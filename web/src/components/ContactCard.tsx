@@ -1,6 +1,6 @@
 import type { Session } from "../types";
 import { Avatar } from "./Avatar";
-import { classNames, pathBase, sessionName } from "../lib/format";
+import { classNames, isOnline, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { HelpCircle } from "lucide-react";
 
@@ -56,7 +56,7 @@ export function ContactCard({
       <div className="flex items-start gap-2.5">
         <div className="relative shrink-0">
           <Avatar id={session.id} label={baseName} size={28} />
-          <StatusDot status={session.status} />
+          <StatusDot status={session.status} online={isOnline(session, now)} />
         </div>
 
         <div className="min-w-0 flex-1">
@@ -123,7 +123,13 @@ function UnreadBadge({
   );
 }
 
-function StatusDot({ status }: { status: Session["status"] }) {
+function StatusDot({
+  status,
+  online,
+}: {
+  status: Session["status"];
+  online: boolean;
+}) {
   const color =
     status === "working"
       ? "var(--color-working)"
@@ -134,16 +140,19 @@ function StatusDot({ status }: { status: Session["status"] }) {
           : status === "done"
             ? "var(--color-done)"
             : "var(--color-registered)";
+  // Offline: hollow gray ring (agent process not running). Online: filled dot
+  // in the status color, with the working pulse.
   return (
     <span
       className="absolute -bottom-0.5 -right-0.5 block h-2 w-2 rounded-full"
       style={{
-        background: color,
+        background: online ? color : "var(--bg-sidebar)",
+        border: online ? "none" : "1.5px solid var(--text-muted)",
         boxShadow: "0 0 0 2px var(--bg-sidebar)",
       }}
       aria-hidden
     >
-      {status === "working" && (
+      {online && status === "working" && (
         <span
           className="absolute inset-0 rounded-full"
           style={{

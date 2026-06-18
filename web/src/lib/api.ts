@@ -29,18 +29,23 @@ export async function getConversation(
   return json<Conversation>(r);
 }
 
+export interface ReplyResult {
+  message: Message;
+  /** What the server did about agent liveness: "spawned" = it was offline and is being woken. */
+  wake?: string;
+}
+
 export async function reply(
   sessionId: string,
   text: string,
   askId?: string | null,
-): Promise<Message> {
+): Promise<ReplyResult> {
   const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/reply`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(askId ? { text, askId } : { text }),
   });
-  const data = await json<{ message: Message }>(r);
-  return data.message;
+  return json<ReplyResult>(r);
 }
 
 export async function cancelAsk(askId: string): Promise<void> {

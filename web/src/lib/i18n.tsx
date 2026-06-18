@@ -86,6 +86,11 @@ const en: Dict = {
   "status.idle": "Idle",
   "status.done": "Done",
   "status.needsReply": "needs your reply",
+  "status.online": "Online",
+  "status.offline": "Offline",
+  "presence.running": "running",
+  "presence.notRunning": "not running",
+  "wake.spawned": "Agent was offline — waking it up to deliver your message…",
 
   "info.status": "Status",
   "info.runtime": "Runtime",
@@ -204,6 +209,11 @@ const zh: Dict = {
   "status.idle": "空闲",
   "status.done": "已完成",
   "status.needsReply": "等待你的回复",
+  "status.online": "在线",
+  "status.offline": "离线",
+  "presence.running": "运行中",
+  "presence.notRunning": "未运行",
+  "wake.spawned": "agent 当前离线 —— 正在唤醒它来接收你的消息…",
 
   "info.status": "状态",
   "info.runtime": "运行时",

@@ -14,7 +14,11 @@ import { useI18n } from "../lib/i18n";
 interface Props {
   session: Session;
   pendingAsk: Message | null;
-  onSend: (sessionId: string, text: string, askId?: string | null) => Promise<void>;
+  onSend: (
+    sessionId: string,
+    text: string,
+    askId?: string | null,
+  ) => Promise<string | undefined>;
 }
 
 const MAX_HEIGHT = 220;

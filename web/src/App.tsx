@@ -49,6 +49,13 @@ function Shell() {
   const [connectOpen, setConnectOpen] = useState(false);
   const notif = useDesktopNotifications();
 
+  // Ticking clock so online/offline presence flips without needing an event.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 20_000);
+    return () => window.clearInterval(t);
+  }, []);
+
   // Apply theme to <html> via data-theme and persist.
   useEffect(() => {
     const root = document.documentElement;
@@ -254,6 +261,7 @@ function Shell() {
         {selected ? (
           <Conversation
             session={selected}
+            now={now}
             onBack={() => setMobileView("contacts")}
             showBack
             infoOpen={infoOpen}
@@ -276,7 +284,7 @@ function Shell() {
           className="hidden md:block md:w-[280px] md:shrink-0 md:border-l"
           style={{ borderColor: "var(--border)" }}
         >
-          <SessionInfo session={selected} now={Date.now()} />
+          <SessionInfo session={selected} now={now} />
         </div>
       )}
 

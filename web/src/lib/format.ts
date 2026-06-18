@@ -37,6 +37,18 @@ export function shortTime(ts: number): string {
   });
 }
 
+// A session is "online" if the agent talked to Beacon within this window. Kept
+// in sync with the server's ONLINE_TTL_MS (src/server/wake.ts).
+export const ONLINE_TTL_MS = 60_000;
+
+/** Whether the agent process is currently live (recently interacted with Beacon). */
+export function isOnline(
+  session: { lastSeenAt: number | null },
+  now: number = Date.now(),
+): boolean {
+  return !!session.lastSeenAt && now - session.lastSeenAt < ONLINE_TTL_MS;
+}
+
 /** Human-facing conversation name: explicit title > agent task > fallback. */
 export function sessionName(
   session: { title?: string | null; task?: string },

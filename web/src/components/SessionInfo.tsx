@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, Copy, Folder, History, Info, Play } from "lucide-react";
 import type { Session } from "../types";
 import { Avatar } from "./Avatar";
-import { pathBase, sessionName, absoluteTime, classNames } from "../lib/format";
+import { pathBase, sessionName, absoluteTime, classNames, isOnline } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -29,6 +29,7 @@ export function SessionInfo({ session, now }: Props) {
   const statusColor = STATUS_COLOR[statusKey];
   const statusLabel = t(`status.${statusKey}`);
   const isWaiting = statusKey === "waiting";
+  const online = isOnline(session, now);
 
   return (
     <aside
@@ -80,6 +81,25 @@ export function SessionInfo({ session, now }: Props) {
               {t("status.needsReply")}
             </span>
           )}
+        </Row>
+        <Row
+          icon={
+            <span
+              className="mt-1.5 inline-block h-1.5 w-1.5 rounded-full"
+              style={{
+                background: online ? "var(--green)" : "transparent",
+                border: online ? "none" : "1.5px solid var(--text-muted)",
+              }}
+              aria-hidden
+            />
+          }
+        >
+          <span style={{ color: online ? "var(--green)" : "var(--text-secondary)" }}>
+            {online ? t("status.online") : t("status.offline")}
+          </span>
+          <span className="ml-1.5 text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+            {online ? t("presence.running") : t("presence.notRunning")}
+          </span>
         </Row>
 
         {/* Runtime */}

@@ -35,7 +35,11 @@ interface StoreState {
   hasPendingAsk: (sessionId: string) => boolean;
   // Actions
   ensureSessionMessages: (sessionId: string) => Promise<void>;
-  send: (sessionId: string, text: string, askId?: string | null) => Promise<void>;
+  send: (
+    sessionId: string,
+    text: string,
+    askId?: string | null,
+  ) => Promise<string | undefined>;
   cancelAsk: (askId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string | null) => Promise<void>;
   setArchived: (sessionId: string, archived: boolean) => Promise<void>;
@@ -233,8 +237,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const send = useCallback(
     async (sessionId: string, text: string, askId?: string | null) => {
       const trimmed = text.trim();
-      if (!trimmed) return;
-      const message = await reply(sessionId, trimmed, askId ?? null);
+      if (!trimmed) return undefined;
+      const { message, wake } = await reply(sessionId, trimmed, askId ?? null);
       setMessagesBySession((prev) => {
         const list = prev[sessionId] ?? [];
         if (list.some((x) => x.id === message.id)) return prev;
@@ -248,6 +252,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         next[idx] = { ...s, updatedAt: Math.max(s.updatedAt, message.createdAt) };
         return next;
       });
+      return wake;
     },
     [],
   );

@@ -15,6 +15,7 @@ export interface Session {
   status: SessionStatus;
   title: string | null;
   archivedAt: number | null;
+  lastSeenAt: number | null;
   createdAt: number;
   updatedAt: number;
 }

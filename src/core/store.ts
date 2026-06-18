@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   status TEXT NOT NULL,
   title TEXT,
   archivedAt INTEGER,
+  lastSeenAt INTEGER,
   createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL
 );
@@ -68,6 +69,7 @@ function ensureColumn(table: string, column: string, decl: string): void {
 }
 ensureColumn('sessions', 'title', 'TEXT');
 ensureColumn('sessions', 'archivedAt', 'INTEGER');
+ensureColumn('sessions', 'lastSeenAt', 'INTEGER');
 
 const now = () => Date.now();
 
@@ -121,8 +123,8 @@ function mapAsk(r: AskRow): Ask {
 
 // ---------- sessions ----------
 const insertSession = db.prepare(
-  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, createdAt, updatedAt)
-   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @createdAt, @updatedAt)`
+  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, lastSeenAt, createdAt, updatedAt)
+   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @lastSeenAt, @createdAt, @updatedAt)`
 );
 const selectSession = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
 const selectSessions = db.prepare(`SELECT * FROM sessions ORDER BY updatedAt DESC`);
@@ -153,6 +155,7 @@ export function createSession(input: {
     status: 'registered',
     title: null,
     archivedAt: null,
+    lastSeenAt: ts,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -201,6 +204,28 @@ export function setArchived(id: string, archived: boolean): Session | undefined 
   const updated = getSession(id)!;
   bus.emit('session', updated);
   return updated;
+}
+
+// ---------- presence ----------
+const updateSeen = db.prepare(`UPDATE sessions SET lastSeenAt = @lastSeenAt WHERE id = @id`);
+const lastSeenEmit = new Map<string, number>();
+
+/**
+ * Mark that the agent just interacted with Beacon (any south API call). Drives
+ * the online/offline presence indicator. WS re-broadcasts are throttled to at
+ * most once per 10s per session so a chatty poller doesn't flood clients; the
+ * UI also recomputes presence on its own clock, so a session that goes quiet
+ * flips to offline without needing an event.
+ */
+export function touchSeen(id: string): void {
+  const ts = now();
+  updateSeen.run({ id, lastSeenAt: ts });
+  const prev = lastSeenEmit.get(id) ?? 0;
+  if (ts - prev > 10_000) {
+    lastSeenEmit.set(id, ts);
+    const s = getSession(id);
+    if (s) bus.emit('session', s);
+  }
 }
 
 // ---------- messages ----------

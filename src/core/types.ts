@@ -26,6 +26,7 @@ export interface Session {
   status: SessionStatus;
   title: string | null; // human-set display name; overrides `task` when present
   archivedAt: number | null; // when archived (hidden from active list), else null
+  lastSeenAt: number | null; // last time the agent talked to Beacon (presence)
   createdAt: number;
   updatedAt: number;
 }

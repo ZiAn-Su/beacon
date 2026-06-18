@@ -13,13 +13,14 @@ import { useEffect, useRef, useState } from "react";
 import type { Session } from "../types";
 import { Avatar } from "./Avatar";
 import { StatusBadge } from "./StatusBadge";
-import { pathBase, sessionName } from "../lib/format";
+import { isOnline, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import { RenameDialog } from "./RenameDialog";
 
 interface Props {
   session: Session;
+  now?: number;
   onBack?: () => void;
   showBack?: boolean;
   infoOpen?: boolean;
@@ -29,6 +30,7 @@ interface Props {
 
 export function ConversationHeader({
   session,
+  now,
   onBack,
   showBack,
   infoOpen,
@@ -37,6 +39,7 @@ export function ConversationHeader({
 }: Props) {
   const { t } = useI18n();
   const { renameSession, setArchived } = useStore();
+  const online = isOnline(session, now ?? Date.now());
   const baseName = pathBase(session.workPath) || session.runtime;
   const title = sessionName(session, t("conv.titleFallback", { name: baseName }));
   const [copied, setCopied] = useState(false);
@@ -120,6 +123,21 @@ export function ConversationHeader({
             )}
           </span>
           <StatusBadge status={session.status} />
+          <span
+            className="inline-flex items-center gap-1 text-[11.5px]"
+            style={{ color: online ? "var(--green)" : "var(--text-muted)" }}
+            title={online ? t("presence.running") : t("presence.notRunning")}
+          >
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{
+                background: online ? "var(--green)" : "transparent",
+                border: online ? "none" : "1.5px solid var(--text-muted)",
+              }}
+              aria-hidden
+            />
+            {online ? t("status.online") : t("status.offline")}
+          </span>
           {copied && (
             <span className="text-[11px]" style={{ color: "var(--green)" }}>
               {t("conv.copied")}

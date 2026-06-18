@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { mountMcpHttp } from './mcp-http';
+import { maybeWake } from './wake';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4319);
@@ -77,6 +78,7 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
 app.post('/api/sessions/:id/notify', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   if (!store.getSession(param(req,'id'))) return notFound(res);
+  store.touchSeen(param(req,'id'));
   const message = store.addMessage({
     sessionId: param(req,'id'),
     direction: 'agent',
@@ -89,6 +91,7 @@ app.post('/api/sessions/:id/notify', (req: Request, res: Response) => {
 app.post('/api/sessions/:id/ask', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   if (!store.getSession(param(req,'id'))) return notFound(res);
+  store.touchSeen(param(req,'id'));
   const options = Array.isArray(req.body?.options)
     ? req.body.options.map(String)
     : null;
@@ -105,6 +108,8 @@ app.post('/api/sessions/:id/ask', (req: Request, res: Response) => {
 app.get('/api/asks/:askId/wait', async (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   const timeoutMs = Math.min(Number(req.query.timeoutMs ?? 25000) || 25000, 60000);
+  const waitingAsk = store.getAsk(param(req,'askId'));
+  if (waitingAsk) store.touchSeen(waitingAsk.sessionId);
   try {
     const ask = await store.waitForAsk(param(req,'askId'), timeoutMs);
     ok(res, { ask });
@@ -121,6 +126,7 @@ app.get('/api/asks/:askId', (req: Request, res: Response) => {
 
 app.post('/api/sessions/:id/status', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
+  store.touchSeen(param(req,'id'));
   const session = store.setStatus(param(req,'id'), String(req.body?.status ?? ''));
   if (!session) return notFound(res);
   ok(res, { session });
@@ -129,6 +135,7 @@ app.post('/api/sessions/:id/status', (req: Request, res: Response) => {
 app.get('/api/sessions/:id/inbox', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   if (!store.getSession(param(req,'id'))) return notFound(res);
+  store.touchSeen(param(req,'id'));
   const after = Number(req.query.after ?? 0) || 0;
   ok(res, { messages: store.inbox(param(req,'id'), after) });
 });
@@ -154,12 +161,16 @@ app.get('/api/sessions/:id/messages', (req: Request, res: Response) => {
 
 app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   if (!store.getSession(param(req,'id'))) return notFound(res);
+  const text = String(req.body?.text ?? '');
   const message = store.reply(
     param(req,'id'),
-    String(req.body?.text ?? ''),
+    text,
     req.body?.askId ? String(req.body.askId) : null
   );
-  ok(res, { message });
+  // If the agent has gone offline, relaunch it so it actually receives this.
+  const session = store.getSession(param(req,'id'))!;
+  const wake = maybeWake(session, text);
+  ok(res, { message, wake });
 });
 
 app.post('/api/asks/:askId/cancel', (req: Request, res: Response) => {

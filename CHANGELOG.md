@@ -3,6 +3,23 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.3.0] - 2026-06-18
+
+### 新增
+
+- **在线/离线状态(presence)。** session 新增 `lastSeenAt`,agent 每次与 Beacon 交互即刷新;
+  界面用实心点(在线/运行中)与空心灰圈(离线/未运行)区分,头部与右侧面板都显示。让你**一眼看出
+  agent 进程是否还在跑**——而不是只看它最后自报的 working/waiting 状态。
+- **离线自动唤醒(auto-wake)。** 给一个**离线**的 agent 发消息时,平台在它的工作目录里把它**重新拉起来**
+  (Claude Code: `claude --continue --print`),把你的消息经 **stdin** 喂给它(不进命令行 → 防注入),
+  复活的 agent 读收件箱、据此继续。**全自动、零配置**:每种运行时的唤醒方式写在 `src/server/wake.ts`
+  代码里一次,人和 agent 都不用配。带 90s 冷却防风暴;给离线 agent 发消息时界面提示「正在唤醒…」。
+- 环境变量:`BEACON_WAKE=0` 关闭自动唤醒;`BEACON_WAKE_CMD` 覆盖唤醒命令(自定义 resume 包装器)。
+
+### 兼容性
+
+- 增量迁移:`sessions` 新增 `lastSeenAt` 列,经 `ALTER TABLE` 原地补齐,旧库升级无损。
+
 ## [0.2.0] - 2026-06-18
 
 ### 新增
