@@ -3,6 +3,22 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.3.1] - 2026-06-19
+
+### 变更 / 修复
+
+- **自动唤醒改为可配置权限,默认关闭(安全可发布)。** 0.3.0 的唤醒只跑
+  `claude --continue --print`,headless 下没有工具权限,被唤醒的 agent 读不了收件箱、回不了消息,
+  悄悄退出 —— 看着像"发了没反应"。现在权限做成可配置:
+  - `BEACON_WAKE` 选择被唤醒 agent 的权限模式,**默认 `off`(不自动唤醒)**。
+  - 启用并选模式:`full`(= Claude 的 `bypassPermissions`,完全自主接着干活)、
+    `acceptEdits`、`default`、`plan`、`bypassPermissions`,直接映射到 `claude --permission-mode`。
+  - `--continue` 复用该对话**之前的上下文/任务**;权限模式由本设置决定(headless 启动无法自动继承)。
+  - `BEACON_WAKE_CMD` 仍可整体覆盖唤醒命令。
+  - **安全提示:** 设成 `full` 后,一条入站消息会自动启动一个**全自主**的 Claude 在该目录真实动手
+    (消耗额度)。这是显式 opt-in;公开默认是关闭的。
+- 唤醒进程的 stdout/stderr 现在被捕获并记录(退出码 + 输出片段),不再静默失败,便于排查。
+
 ## [0.3.0] - 2026-06-18
 
 ### 新增

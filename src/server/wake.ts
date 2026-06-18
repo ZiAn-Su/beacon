@@ -18,7 +18,22 @@ import type { Session } from '../core/types';
 export const ONLINE_TTL_MS = 60_000;
 // Don't relaunch the same agent more than once per this window (avoid storms).
 const COOLDOWN_MS = 90_000;
-const ENABLED = process.env.BEACON_WAKE !== '0';
+
+// Auto-wake is OFF by default — relaunching an agent runs it with real tool
+// permissions, so the operator must opt in explicitly. BEACON_WAKE selects the
+// permission mode the woken agent runs under:
+//   off (default) | full | acceptEdits | default | plan | bypassPermissions
+// `full` is a friendly alias for Claude's bypassPermissions (fully autonomous).
+const RAW_WAKE = (process.env.BEACON_WAKE ?? 'off').trim();
+const WAKE_OFF =
+  RAW_WAKE === '' || RAW_WAKE === 'off' || RAW_WAKE === '0' || RAW_WAKE === 'false';
+
+function permissionMode(): string {
+  if (RAW_WAKE === 'full' || RAW_WAKE === 'bypass' || RAW_WAKE === 'yolo') {
+    return 'bypassPermissions';
+  }
+  return RAW_WAKE; // pass through: default | acceptEdits | plan | bypassPermissions
+}
 
 const lastWake = new Map<string, number>();
 
@@ -38,8 +53,12 @@ function wakeArgv(runtime: string): string[] | null {
   if (override && override.trim()) return override.trim().split(/\s+/);
   switch (runtime) {
     case 'claude-code':
-      // Resume the most recent conversation in the work dir, one print turn.
-      return ['claude', '--continue', '--print'];
+      // Resume the most recent conversation in the work dir (reuses its full
+      // context/task), one print turn, under the operator-chosen permission
+      // mode. A headless `claude -p` cannot use tools — and so cannot run the
+      // beacon skill to read its inbox or reply — unless a permission mode is
+      // given; that is why auto-wake is opt-in (BEACON_WAKE).
+      return ['claude', '--continue', '--print', '--permission-mode', permissionMode()];
     default:
       return null;
   }
@@ -51,10 +70,13 @@ function wakePrompt(humanText: string): string {
     '',
     humanText,
     '',
-    'This continues your earlier task session in this directory. First check your',
-    'Beacon inbox (the check_inbox tool, or your beacon skill\'s `inbox` command) to',
-    'make sure you have not missed anything, then act on it. Use notify to keep the',
-    'human posted, and ask if you need a decision.',
+    'This continues your earlier task session in this directory. Do these now:',
+    '1) Immediately send a short Beacon notify acknowledging you received it (so',
+    '   the human sees you are back) — run your beacon skill, e.g.',
+    '   `node <your beacon skill path>/beacon.mjs notify "on it: ..."`.',
+    '2) Check your Beacon inbox (`... beacon.mjs inbox`) for anything you missed.',
+    '3) Act on the message, then notify the human of the result, or ask if you',
+    '   need a decision. Keep it concise.',
   ].join('\n');
 }
 
@@ -69,7 +91,7 @@ export type WakeResult =
 
 /** Wake the agent if it is offline and we know how. Returns what it did. */
 export function maybeWake(session: Session, humanText: string): WakeResult {
-  if (!ENABLED) return 'disabled';
+  if (WAKE_OFF) return 'disabled';
   if (isOnline(session)) return 'online';
   if (!session.workPath) return 'no-workpath';
   const argv = wakeArgv(session.runtime);
@@ -83,23 +105,32 @@ export function maybeWake(session: Session, humanText: string): WakeResult {
     const isWin = process.platform === 'win32';
     // On Windows, `claude` is a .cmd shim, which Node won't exec without a shell;
     // route through cmd.exe but keep the prompt on stdin (no shell interpolation
-    // of the message). On POSIX, spawn the binary directly.
+    // of the message). On POSIX, spawn the binary directly. Capture output so we
+    // can see whether the wake actually did anything (vs failing silently).
     const child = isWin
       ? spawn('cmd.exe', ['/c', ...argv], {
           cwd: session.workPath,
-          stdio: ['pipe', 'ignore', 'ignore'],
+          stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
         })
       : spawn(argv[0], argv.slice(1), {
           cwd: session.workPath,
-          stdio: ['pipe', 'ignore', 'ignore'],
-          detached: true,
+          stdio: ['pipe', 'pipe', 'pipe'],
         });
+    let out = '';
+    const cap = (b: Buffer) => {
+      if (out.length < 4000) out += b.toString();
+    };
+    child.stdout?.on('data', cap);
+    child.stderr?.on('data', cap);
     child.on('error', (e) =>
       console.error(`[wake] spawn error for ${session.id}: ${e.message}`),
     );
+    child.on('close', (code) => {
+      const tail = out.replace(/\s+/g, ' ').trim().slice(-500);
+      console.log(`[wake] ${session.id} exited code=${code}; output: ${tail || '(empty)'}`);
+    });
     child.stdin?.end(wakePrompt(humanText));
-    child.unref?.();
     console.log(
       `[wake] relaunched ${session.runtime} in ${session.workPath} for session ${session.id}`,
     );

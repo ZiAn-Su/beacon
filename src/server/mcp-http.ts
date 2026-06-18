@@ -86,7 +86,7 @@ export function mountMcpHttp(app: Express, opts: { token: string }): void {
       transport.onclose = () => {
         if (transport!.sessionId) delete transports[transport!.sessionId];
       };
-      const server = new McpServer({ name: 'beacon', version: '0.3.0' });
+      const server = new McpServer({ name: 'beacon', version: '0.3.1' });
       registerBeaconTools(server, storeOps(), {
         runtime: process.env.AGENT_RUNTIME ?? 'claude-code',
         workPath: '',
