@@ -38,7 +38,11 @@ export function registerBeaconTools(
   ops: AgentOps,
   defaults: AgentDefaults,
 ): void {
-  let sessionId: string | null = null;
+  // When the platform relaunches an offline agent, it injects the original
+  // session id via env so the agent attaches to the existing conversation
+  // instead of registering a new one.
+  const injectedId = process.env.BEACON_SESSION_ID ?? '';
+  let sessionId: string | null = injectedId || null;
   let lastInboxTs = 0;
 
   async function ensure(task?: string): Promise<string> {

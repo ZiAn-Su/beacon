@@ -20,6 +20,9 @@ const BASE = (process.env.PLATFORM_URL ?? 'http://127.0.0.1:4319').replace(/\/$/
 const TOKEN = process.env.PLATFORM_TOKEN ?? '';
 const RUNTIME = process.env.AGENT_RUNTIME ?? 'claude-code';
 const WORK = process.env.AGENT_WORK_PATH ?? process.cwd();
+// When the platform relaunches an offline agent, it injects this so the skill
+// attaches to the original conversation instead of registering a new one.
+const INJECTED_SESSION = process.env.BEACON_SESSION_ID ?? '';
 
 const cacheDir = join(tmpdir(), 'beacon');
 if (!existsSync(cacheDir)) mkdirSync(cacheDir, { recursive: true });
@@ -54,6 +57,11 @@ async function register(task) {
 }
 
 async function ensureSession() {
+  // Priority: injected id (platform-relaunched) > local cache > new registration.
+  if (INJECTED_SESSION) {
+    saveCache({ ...loadCache(), sessionId: INJECTED_SESSION });
+    return INJECTED_SESSION;
+  }
   const c = loadCache();
   return c.sessionId || register('');
 }

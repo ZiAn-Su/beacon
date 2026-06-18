@@ -77,6 +77,10 @@ export function startAgent(
 
   try {
     const isWin = process.platform === 'win32';
+    // Tell the relaunched agent WHICH Beacon session it is, so its beacon
+    // skill / MCP attaches to this conversation instead of registering a new
+    // one. The env propagates down to the skill subprocess the agent runs.
+    const env = { ...process.env, BEACON_SESSION_ID: session.id };
     // On Windows, `claude` is a .cmd shim, which Node won't exec without a shell;
     // route through cmd.exe but keep the prompt on stdin (no shell interpolation
     // of the message). On POSIX, spawn the binary directly. Capture output so we
@@ -86,10 +90,12 @@ export function startAgent(
           cwd: session.workPath,
           stdio: ['pipe', 'pipe', 'pipe'],
           windowsHide: true,
+          env,
         })
       : spawn(argv[0], argv.slice(1), {
           cwd: session.workPath,
           stdio: ['pipe', 'pipe', 'pipe'],
+          env,
         });
     let out = '';
     const cap = (b: Buffer) => {
