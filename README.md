@@ -311,3 +311,7 @@ cd web && npm run dev  # 前端开发服务器 :5173(代理 /api + /ws 到 :4319
 
 多用户账户 + 人侧登录鉴权、Matrix/Element 后端(手机多端)、远程 MCP 让云端 agent 直接指向 URL 接入、
 每 agent 独立 API key、部署打包。
+
+## License / 许可证
+
+[MIT](LICENSE). Use it freely. 自由使用。
