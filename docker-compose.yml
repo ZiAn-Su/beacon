@@ -1,0 +1,16 @@
+services:
+  beacon:
+    build: .
+    image: beacon
+    ports:
+      - "4319:4319"
+    environment:
+      - PORT=4319
+      # Uncomment to require agents to authenticate at the south ingress:
+      # - PLATFORM_TOKEN=change-me
+    volumes:
+      - beacon-data:/data
+    restart: unless-stopped
+
+volumes:
+  beacon-data:

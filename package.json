@@ -1,0 +1,36 @@
+{
+  "name": "beacon",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Beacon: humans and AI agents talk over a neutral, runtime-agnostic bus. Agents plug in via MCP; the human side reuses a mature IM (Matrix/Element) or a built-in dev console.",
+  "scripts": {
+    "platform": "tsx src/server/index.ts",
+    "dev": "tsx watch src/server/index.ts",
+    "mcp": "tsx src/mcp/server.ts",
+    "sim": "tsx scripts/sim-agent.ts",
+    "e2e": "node --import tsx scripts/mcp-e2e.ts",
+    "e2e:http": "node --import tsx scripts/mcp-http-smoke.ts",
+    "build:web": "cd web && npm install && npm run build",
+    "start": "npm run build:web && npm run platform",
+    "update": "git pull && npm install && npm run build:web",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check:encoding": "node scripts/check-encoding.mjs",
+    "verify": "npm run typecheck && npm run check:encoding && npm run build:web"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "better-sqlite3": "^12.11.1",
+    "express": "^5.2.1",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.9.3",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}

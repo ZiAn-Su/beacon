@@ -1,0 +1,113 @@
+// Hosted MCP endpoint — the platform serves the Beacon MCP server itself over
+// Streamable HTTP at POST/GET/DELETE /mcp. This is the recommended way to plug
+// an agent in:
+//
+//   claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
+//
+// No local file paths, no `node`/`tsx`, `-s user` makes it global across all
+// projects, and the command NEVER changes when the platform is updated — the
+// URL is the stable contract. Tools run in-process and call the core store
+// directly, so agent->human events flow straight onto the bus (and the WS UI).
+import type { Express, Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+import * as store from '../core/store';
+import { registerBeaconTools, type AgentOps } from '../mcp/tools';
+
+// Direct, in-process ops backed by the core store (no HTTP round-trip).
+function storeOps(): AgentOps {
+  return {
+    async register(input) {
+      const s = store.createSession({
+        runtime: input.runtime || 'claude-code',
+        workPath: input.workPath || '',
+        task: input.task || '',
+      });
+      return { id: s.id };
+    },
+    async notify(id, text) {
+      store.addMessage({ sessionId: id, direction: 'agent', kind: 'notify', text });
+    },
+    async ask(id, question, options) {
+      const a = store.createAsk({ sessionId: id, question, options: options ?? null });
+      return { askId: a.id };
+    },
+    async waitAsk(askId, timeoutMs) {
+      const a = await store.waitForAsk(askId, timeoutMs);
+      return { status: a.status, answer: a.answer };
+    },
+    async setStatus(id, status) {
+      store.setStatus(id, status);
+    },
+    async inbox(id, after) {
+      return store.inbox(id, after).map((m) => ({ text: m.text, createdAt: m.createdAt }));
+    },
+  };
+}
+
+export function mountMcpHttp(app: Express, opts: { token: string }): void {
+  // One transport per MCP session id (Streamable HTTP keeps the connection
+  // stateful so a single agent's tool calls share one Beacon session).
+  const transports: Record<string, StreamableHTTPServerTransport> = {};
+
+  function authOk(req: Request, res: Response): boolean {
+    if (!opts.token) return true;
+    const tok =
+      req.header('x-platform-token') ??
+      (req.header('authorization') ?? '').replace(/^Bearer\s+/i, '');
+    if (tok === opts.token) return true;
+    res.status(401).json({ error: 'unauthorized' });
+    return false;
+  }
+
+  app.post('/mcp', async (req: Request, res: Response) => {
+    if (!authOk(req, res)) return;
+    const sid = req.header('mcp-session-id');
+    let transport: StreamableHTTPServerTransport | undefined =
+      sid ? transports[sid] : undefined;
+
+    if (!transport) {
+      if (sid || !isInitializeRequest(req.body)) {
+        res.status(400).json({
+          jsonrpc: '2.0',
+          error: { code: -32000, message: 'Bad Request: no valid session for non-initialize call' },
+          id: null,
+        });
+        return;
+      }
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => {
+          transports[id] = transport!;
+        },
+      });
+      transport.onclose = () => {
+        if (transport!.sessionId) delete transports[transport!.sessionId];
+      };
+      const server = new McpServer({ name: 'beacon', version: '0.2.0' });
+      registerBeaconTools(server, storeOps(), {
+        runtime: process.env.AGENT_RUNTIME ?? 'claude-code',
+        workPath: '',
+        task: '',
+      });
+      await server.connect(transport);
+    }
+
+    await transport.handleRequest(req, res, req.body);
+  });
+
+  const sessionRequest = async (req: Request, res: Response) => {
+    if (!authOk(req, res)) return;
+    const sid = req.header('mcp-session-id');
+    const transport = sid ? transports[sid] : undefined;
+    if (!transport) {
+      res.status(400).send('Invalid or missing MCP session id');
+      return;
+    }
+    await transport.handleRequest(req, res);
+  };
+  app.get('/mcp', sessionRequest);
+  app.delete('/mcp', sessionRequest);
+}

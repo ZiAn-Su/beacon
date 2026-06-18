@@ -1,0 +1,222 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Beacon — Codex-clean design tokens
+   Light is the primary theme. Dark is supported via [data-theme="dark"] or
+   the .dark class. Near-monochrome with a single warm beacon-orange accent.
+   --------------------------------------------------------------------------- */
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+}
+
+/* Light is the default primary theme. */
+:root {
+  color-scheme: light;
+  --bg: #FFFFFF;
+  --bg-sidebar: #F7F7F8;
+  --surface-card: #FFFFFF;
+  --surface-hover: #F4F4F5;
+  --surface-active: #EEEEF0;
+  --border: #ECECEE;
+  --border-strong: #DEDEE1;
+  --text: #18181B;
+  --text-secondary: #6B6B72;
+  --text-muted: #9B9BA2;
+  --accent: #EA580C;
+  --accent-2: #F97316;
+  --accent-soft: rgba(234, 88, 12, 0.10);
+  --green: #16A34A;
+  --amber: #D97706;
+  --slate: #71717A;
+  --muted-done: #A1A1AA;
+  --danger: #DC2626;
+  --shadow-1: 0 1px 2px rgba(24, 24, 27, 0.05);
+  --shadow-2: 0 4px 12px -4px rgba(24, 24, 27, 0.10);
+}
+
+/* Dark theme: near-monochrome. */
+:root[data-theme="dark"],
+:root.dark {
+  color-scheme: dark;
+  --bg: #0E0E10;
+  --bg-sidebar: #161617;
+  --surface-card: #19191B;
+  --surface-hover: #1F1F22;
+  --surface-active: #242427;
+  --border: #2A2A2E;
+  --border-strong: #34343A;
+  --text: #FAFAFA;
+  --text-secondary: #A1A1AA;
+  --text-muted: #71717A;
+  --accent: #F97316;
+  --accent-2: #FB923C;
+  --accent-soft: rgba(249, 115, 22, 0.14);
+  --green: #22C55E;
+  --amber: #F59E0B;
+  --slate: #A1A1AA;
+  --muted-done: #71717A;
+  --danger: #EF4444;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 6px 16px -6px rgba(0, 0, 0, 0.55);
+}
+
+/* Status color helpers (light defaults; dark theme remaps below). */
+:root {
+  --color-working: var(--green);
+  --color-working-soft: rgba(22, 163, 74, 0.10);
+  --color-waiting: var(--accent);
+  --color-waiting-soft: var(--accent-soft);
+  --color-idle: var(--slate);
+  --color-idle-soft: rgba(113, 113, 122, 0.10);
+  --color-done: var(--muted-done);
+  --color-done-soft: rgba(161, 161, 170, 0.10);
+  --color-registered: var(--slate);
+  --color-registered-soft: rgba(113, 113, 122, 0.10);
+}
+:root[data-theme="dark"],
+:root.dark {
+  --color-working: var(--green);
+  --color-working-soft: rgba(34, 197, 94, 0.14);
+  --color-waiting: var(--accent);
+  --color-waiting-soft: rgba(249, 115, 22, 0.14);
+  --color-idle: var(--slate);
+  --color-idle-soft: rgba(161, 161, 170, 0.14);
+  --color-done: var(--muted-done);
+  --color-done-soft: rgba(113, 113, 122, 0.14);
+  --color-registered: var(--slate);
+  --color-registered-soft: rgba(161, 161, 170, 0.14);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+html {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Subtle, theme-aware scrollbar. */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+.scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Keyframes */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(0.92); }
+}
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Reusable surface helpers. */
+.surface {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+}
+.surface-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+}
+.hairline {
+  border-color: var(--border);
+}
+.text-secondary { color: var(--text-secondary); }
+.text-muted     { color: var(--text-muted); }
+.text-strong    { color: var(--text); }
+
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex: none;
+}
+
+/* Subtle working pulse for the status dot. */
+.working-dot {
+  background: var(--color-working);
+  animation: pulse-soft 2.4s ease-in-out infinite;
+}
+.working-ring {
+  position: relative;
+}
+.working-ring::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 9999px;
+  border: 1px solid var(--color-working-soft);
+  animation: pulse-soft 2.2s ease-in-out infinite;
+}
