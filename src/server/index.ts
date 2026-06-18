@@ -15,7 +15,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { mountMcpHttp } from './mcp-http';
-import { maybeWake } from './wake';
+import { startAgent, isOnline, canStart } from './wake';
+import { getSettings, setSettings } from '../core/settings';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4319);
@@ -167,10 +168,43 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
     text,
     req.body?.askId ? String(req.body.askId) : null
   );
-  // If the agent has gone offline, relaunch it so it actually receives this.
+  // Decide what happens for the agent. If it's online, nothing to do. If it's
+  // offline, behaviour follows the in-app setting: start it automatically, ask
+  // the user (the UI shows a one-click prompt), or just queue.
   const session = store.getSession(param(req,'id'))!;
-  const wake = maybeWake(session, text);
-  ok(res, { message, wake });
+  let agent: 'online' | 'starting' | 'offline' | 'queued' = 'online';
+  if (!isOnline(session)) {
+    const canRelaunch = canStart(session.runtime);
+    const mode = getSettings().autoStart;
+    if (mode === 'auto' && canRelaunch) {
+      startAgent(session, text, getSettings().startPermission);
+      agent = 'starting';
+    } else if (mode === 'ask' && canRelaunch) {
+      agent = 'offline'; // UI offers a "start it?" button
+    } else {
+      agent = 'queued';
+    }
+  }
+  ok(res, { message, agent });
+});
+
+// Start an offline agent now (the UI's one-click "start it" action).
+app.post('/api/sessions/:id/start', (req: Request, res: Response) => {
+  const session = store.getSession(param(req, 'id'));
+  if (!session) return notFound(res);
+  const text = String(req.body?.text ?? '');
+  const result = startAgent(session, text, getSettings().startPermission);
+  ok(res, { result });
+});
+
+// In-app settings (no env vars).
+app.get('/api/settings', (_req: Request, res: Response) => ok(res, { settings: getSettings() }));
+app.put('/api/settings', (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const patch: Record<string, unknown> = {};
+  if (typeof body.autoStart === 'string') patch.autoStart = body.autoStart;
+  if (typeof body.startPermission === 'string') patch.startPermission = body.startPermission;
+  ok(res, { settings: setSettings(patch) });
 });
 
 app.post('/api/asks/:askId/cancel', (req: Request, res: Response) => {

@@ -1,4 +1,4 @@
-import { Bell, BellOff, Languages, Moon, Sun } from "lucide-react";
+import { Bell, BellOff, Languages, Moon, Settings, Sun } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -6,6 +6,7 @@ interface Props {
   onToggleTheme: () => void;
   notifPermission: "default" | "granted" | "denied" | "unsupported";
   onRequestNotifications: () => Promise<unknown>;
+  onOpenSettings: () => void;
 }
 
 export function Rail({
@@ -13,6 +14,7 @@ export function Rail({
   onToggleTheme,
   notifPermission,
   onRequestNotifications,
+  onOpenSettings,
 }: Props) {
   const { t, lang, toggleLang } = useI18n();
   return (
@@ -62,6 +64,25 @@ export function Rail({
         )}
       </div>
       <div className="flex flex-col items-center gap-3">
+        <button
+          onClick={onOpenSettings}
+          aria-label={t("settings.title")}
+          title={t("settings.title")}
+          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150"
+          style={{
+            color: "var(--text-secondary)",
+            background: "transparent",
+            border: "1px solid transparent",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--surface-hover)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+          }}
+        >
+          <Settings size={17} />
+        </button>
         <button
           onClick={toggleLang}
           aria-label={lang === "zh" ? t("rail.langToEn") : t("rail.langToZh")}

@@ -23,7 +23,7 @@ const RUNTIME = process.env.AGENT_RUNTIME ?? 'claude-code';
 const WORK_PATH = process.env.AGENT_WORK_PATH ?? process.cwd();
 const DEFAULT_TASK = process.env.AGENT_TASK ?? '';
 
-const server = new McpServer({ name: 'beacon', version: '0.3.1' });
+const server = new McpServer({ name: 'beacon', version: '0.4.0' });
 registerBeaconTools(server, httpOps(PLATFORM_URL, PLATFORM_TOKEN), {
   runtime: RUNTIME,
   workPath: WORK_PATH,

@@ -6,6 +6,7 @@ import { Conversation } from "./components/Conversation";
 import { SessionInfo } from "./components/SessionInfo";
 import { EmptyState } from "./components/EmptyState";
 import { ConnectAgentModal } from "./components/ConnectAgentModal";
+import { SettingsModal } from "./components/SettingsModal";
 import { StoreProvider, useStore } from "./lib/store";
 import { useDocumentTitle } from "./lib/useDocumentTitle";
 import { useDesktopNotifications } from "./lib/useDesktopNotifications";
@@ -47,6 +48,7 @@ function Shell() {
   );
   const [infoOpen, setInfoOpen] = useState(true);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const notif = useDesktopNotifications();
 
   // Ticking clock so online/offline presence flips without needing an event.
@@ -185,6 +187,7 @@ function Shell() {
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         notifPermission={notif.permission}
         onRequestNotifications={notif.requestPermission}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       {/* Mobile-only theme + notif toggles in the header. */}
@@ -302,6 +305,8 @@ function Shell() {
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
       />
+
+      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

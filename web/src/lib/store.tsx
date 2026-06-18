@@ -12,9 +12,14 @@ import type { Message, Session, WsEvent } from "../types";
 import {
   cancelAsk,
   getConversation,
+  getSettings,
   listSessions,
   patchSession,
+  putSettings,
   reply,
+  startAgent as startAgentApi,
+  type AgentDelivery,
+  type AppSettings,
 } from "./api";
 import { useSocket } from "./useSocket";
 
@@ -39,10 +44,13 @@ interface StoreState {
     sessionId: string,
     text: string,
     askId?: string | null,
-  ) => Promise<string | undefined>;
+  ) => Promise<AgentDelivery | undefined>;
   cancelAsk: (askId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string | null) => Promise<void>;
   setArchived: (sessionId: string, archived: boolean) => Promise<void>;
+  startAgent: (sessionId: string, text: string) => Promise<string>;
+  settings: AppSettings | null;
+  updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   /** Force-reset unread for a session (e.g. on focus). */
   markSessionRead: (sessionId: string) => void;
 }
@@ -238,7 +246,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     async (sessionId: string, text: string, askId?: string | null) => {
       const trimmed = text.trim();
       if (!trimmed) return undefined;
-      const { message, wake } = await reply(sessionId, trimmed, askId ?? null);
+      const { message, agent } = await reply(sessionId, trimmed, askId ?? null);
       setMessagesBySession((prev) => {
         const list = prev[sessionId] ?? [];
         if (list.some((x) => x.id === message.id)) return prev;
@@ -252,10 +260,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         next[idx] = { ...s, updatedAt: Math.max(s.updatedAt, message.createdAt) };
         return next;
       });
-      return wake;
+      return agent;
     },
     [],
   );
+
+  const startAgent = useCallback(
+    (sessionId: string, text: string) => startAgentApi(sessionId, text),
+    [],
+  );
+
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  useEffect(() => {
+    getSettings()
+      .then(setSettings)
+      .catch(() => {
+        /* backend may be down */
+      });
+  }, []);
+  const updateSettings = useCallback(async (patch: Partial<AppSettings>) => {
+    const next = await putSettings(patch);
+    setSettings(next);
+  }, []);
 
   const upsertSession = useCallback((session: Session) => {
     setSessions((prev) => {
@@ -302,6 +328,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelAsk,
       renameSession,
       setArchived,
+      startAgent,
+      settings,
+      updateSettings,
       markSessionRead,
     }),
     [
@@ -320,6 +349,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       send,
       renameSession,
       setArchived,
+      startAgent,
+      settings,
+      updateSettings,
       markSessionRead,
     ],
   );

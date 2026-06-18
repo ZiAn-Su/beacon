@@ -3,6 +3,20 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.4.0] - 2026-06-19
+
+### 变更(产品化:把"启动离线智能体"做成界面操作,不再用环境变量)
+
+- **给没在运行的智能体发消息时,界面直接出现「启动并处理」一键按钮。** 点一下就把它启动起来读消息、
+  回你;可勾「以后自动启动」记住选择。普通用户全程在界面里完成,**不接触任何环境变量或"唤醒"黑话**。
+- **新增设置面板(左栏齿轮)**,纯中文/英文选项:「先问我(默认)」/「自动启动它」/「只把消息排队」。
+  设置存到 `data/settings.json`,经 `GET/PUT /api/settings` 读写。
+- 新增 `POST /api/sessions/:id/start` 一键启动端点;`POST /reply` 现在按设置返回
+  `agent: online | starting | offline | queued`,驱动界面。
+- 启动逻辑仍是 `claude --continue --print --permission-mode <mode>`(复用对话上下文,stdin 传消息、防注入);
+  权限默认 `bypassPermissions`(让它能真正干活),由设置控制,不再靠 `BEACON_WAKE` 环境变量。
+  `BEACON_WAKE_CMD` 作为高级覆盖仍保留。
+
 ## [0.3.1] - 2026-06-19
 
 ### 变更 / 修复

@@ -29,10 +29,13 @@ export async function getConversation(
   return json<Conversation>(r);
 }
 
+// What happened for the agent after you sent: it's running, we're starting it,
+// it's offline and the UI should offer to start it, or the message was queued.
+export type AgentDelivery = "online" | "starting" | "offline" | "queued";
+
 export interface ReplyResult {
   message: Message;
-  /** What the server did about agent liveness: "spawned" = it was offline and is being woken. */
-  wake?: string;
+  agent?: AgentDelivery;
 }
 
 export async function reply(
@@ -46,6 +49,36 @@ export async function reply(
     body: JSON.stringify(askId ? { text, askId } : { text }),
   });
   return json<ReplyResult>(r);
+}
+
+/** One-click "start the offline agent now". */
+export async function startAgent(sessionId: string, text: string): Promise<string> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/start`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  const data = await json<{ result: string }>(r);
+  return data.result;
+}
+
+export interface AppSettings {
+  autoStart: "ask" | "auto" | "off";
+  startPermission: string;
+}
+
+export async function getSettings(): Promise<AppSettings> {
+  const r = await fetch("/api/settings");
+  return (await json<{ settings: AppSettings }>(r)).settings;
+}
+
+export async function putSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+  const r = await fetch("/api/settings", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  return (await json<{ settings: AppSettings }>(r)).settings;
 }
 
 export async function cancelAsk(askId: string): Promise<void> {
