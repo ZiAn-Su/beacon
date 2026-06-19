@@ -1,6 +1,15 @@
 // PTY WebSocket server — embeds a real terminal in the web UI.
-// Clients connect to /pty?sessionId=<id> and get a full PTY session
-// running the session's agent (claude --continue, codex, etc.) in its workPath.
+//
+// Clients connect to /pty?sessionId=<id> and get a full PTY running the
+// session's agent (claude --continue, codex, etc.) in its workPath.
+//
+// PTY processes are PERSISTENT and keyed by sessionId: spawning `claude
+// --continue` is expensive (cold-starts the CLI, reloads the whole
+// conversation), so we keep the process alive across reconnects. Switching
+// the Messages/Terminal tab, reloading the page, or opening a second browser
+// tab all *attach* to the same live process — only the very first open pays
+// the spawn cost. Recent output is buffered and replayed on attach so the
+// screen is reconstructed instantly.
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import * as pty from 'node-pty';
@@ -9,10 +18,26 @@ import * as store from '../core/store';
 
 const isWin = process.platform === 'win32';
 
+// Cap of replayed scrollback per session (chars). Enough to redraw a TUI.
+const BUFFER_CAP = 200_000;
+// Kill an idle PTY this long after its last client disconnects.
+const IDLE_KILL_MS = 30 * 60_000;
+
 interface SpawnTarget {
   file: string;
   args: string[];
 }
+
+interface LivePty {
+  proc: pty.IPty;
+  buffer: string;
+  clients: Set<WebSocket>;
+  cols: number;
+  rows: number;
+  idleTimer: NodeJS.Timeout | null;
+}
+
+const live = new Map<string, LivePty>();
 
 function spawnTarget(runtime: string): SpawnTarget {
   const wrap = (cmd: string): SpawnTarget =>
@@ -27,6 +52,70 @@ function spawnTarget(runtime: string): SpawnTarget {
   return isWin
     ? { file: 'cmd.exe', args: [] }
     : { file: process.env.SHELL ?? 'bash', args: [] };
+}
+
+function getOrSpawn(sessionId: string): LivePty | { error: string } {
+  const existing = live.get(sessionId);
+  if (existing) return existing;
+
+  const session = store.getSession(sessionId);
+  if (!session) return { error: 'Session not found' };
+
+  const { file, args } = spawnTarget(session.runtime);
+  const cols = 120;
+  const rows = 30;
+
+  let proc: pty.IPty;
+  try {
+    proc = pty.spawn(file, args, {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd: session.workPath || process.cwd(),
+      env: {
+        ...process.env,
+        BEACON_SESSION_ID: session.id,
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+      } as Record<string, string>,
+    });
+  } catch (err) {
+    return { error: `Failed to start: ${String(err)}` };
+  }
+
+  const entry: LivePty = {
+    proc,
+    buffer: '',
+    clients: new Set(),
+    cols,
+    rows,
+    idleTimer: null,
+  };
+  live.set(sessionId, entry);
+
+  proc.onData((data: string) => {
+    entry.buffer += data;
+    if (entry.buffer.length > BUFFER_CAP) {
+      entry.buffer = entry.buffer.slice(entry.buffer.length - BUFFER_CAP);
+    }
+    for (const ws of entry.clients) {
+      if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    }
+  });
+
+  proc.onExit(({ exitCode }) => {
+    const note = `\r\n\x1b[2m[process exited (${exitCode})]\x1b[0m\r\n`;
+    for (const ws of entry.clients) {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(note);
+        ws.close();
+      }
+    }
+    if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    live.delete(sessionId);
+  });
+
+  return entry;
 }
 
 export function mountPtyWs(platformToken: string): WebSocketServer {
@@ -46,62 +135,60 @@ export function mountPtyWs(platformToken: string): WebSocketServer {
       }
     }
 
-    const session = store.getSession(sessionId);
-    if (!session) {
-      ws.send('\r\n[Session not found]\r\n');
-      ws.close(1008, 'Session not found');
+    const result = getOrSpawn(sessionId);
+    if ('error' in result) {
+      ws.close(1008, result.error);
       return;
     }
+    const entry = result;
 
-    const { file, args } = spawnTarget(session.runtime);
-
-    let proc: pty.IPty;
-    try {
-      proc = pty.spawn(file, args, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
-        cwd: session.workPath || process.cwd(),
-        env: {
-          ...process.env,
-          BEACON_SESSION_ID: session.id,
-          TERM: 'xterm-256color',
-          COLORTERM: 'truecolor',
-        } as Record<string, string>,
-      });
-    } catch (err) {
-      ws.send(`\r\n[Failed to start: ${String(err)}]\r\n`);
-      ws.close();
-      return;
+    // Attach this client and cancel any pending idle-kill.
+    entry.clients.add(ws);
+    if (entry.idleTimer) {
+      clearTimeout(entry.idleTimer);
+      entry.idleTimer = null;
     }
 
-    proc.onData((data: string) => {
-      if (ws.readyState === WebSocket.OPEN) ws.send(data);
-    });
-
-    proc.onExit(({ exitCode }) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(`\r\n[Process exited (${exitCode})]\r\n`);
-        ws.close();
-      }
-    });
+    // Replay buffered output so a reconnecting client sees the current screen
+    // immediately instead of a blank terminal.
+    if (entry.buffer && ws.readyState === WebSocket.OPEN) {
+      ws.send(entry.buffer);
+    }
 
     ws.on('message', (raw: Buffer | ArrayBuffer | Buffer[]) => {
       try {
-        const text = raw.toString();
-        const msg = JSON.parse(text) as { type: string; data?: string; cols?: number; rows?: number };
+        const msg = JSON.parse(raw.toString()) as {
+          type: string;
+          data?: string;
+          cols?: number;
+          rows?: number;
+        };
         if (msg.type === 'input' && typeof msg.data === 'string') {
-          proc.write(msg.data);
+          entry.proc.write(msg.data);
         } else if (msg.type === 'resize' && msg.cols && msg.rows) {
-          proc.resize(Number(msg.cols), Number(msg.rows));
+          const cols = Number(msg.cols);
+          const rows = Number(msg.rows);
+          if (cols !== entry.cols || rows !== entry.rows) {
+            entry.cols = cols;
+            entry.rows = rows;
+            try { entry.proc.resize(cols, rows); } catch { /* exited */ }
+          }
         }
       } catch {
-        proc.write(raw.toString());
+        entry.proc.write(raw.toString());
       }
     });
 
     ws.on('close', () => {
-      try { proc.kill(); } catch { /* already exited */ }
+      entry.clients.delete(ws);
+      // Keep the PTY alive for fast re-attach. Only kill after a long idle with
+      // no clients, so we don't leak processes for sessions nobody returns to.
+      if (entry.clients.size === 0 && !entry.idleTimer) {
+        entry.idleTimer = setTimeout(() => {
+          try { entry.proc.kill(); } catch { /* already exited */ }
+          live.delete(sessionId);
+        }, IDLE_KILL_MS);
+      }
     });
   });
 
