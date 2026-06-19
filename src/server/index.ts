@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
+import { SESSION_STATUSES } from '../core/types';
 import { mountMcpHttp } from './mcp-http';
 import { mountPtyWs, hasLivePty, writeToPty } from './pty';
 import { startAgent, isOnline } from './wake';
@@ -42,6 +43,15 @@ const BEACON_CLI = join(SKILL_DIR, 'beacon.mjs');
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+// ISS-009: return JSON error (not HTML stack-trace) for malformed request bodies.
+app.use((err: unknown, _req: Request, res: Response, next: (e: unknown) => void) => {
+  const e = err as { type?: string; status?: number; message?: string };
+  if (e.type === 'entity.parse.failed') {
+    res.status(400).json({ error: 'invalid json' });
+    return;
+  }
+  next(err);
+});
 
 const ok = (res: Response, body: unknown) => res.json(body);
 const notFound = (res: Response) =>
@@ -69,10 +79,17 @@ function agentAuthOk(req: Request, res: Response): boolean {
 app.post('/api/sessions/register', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   const { runtime, workPath, task } = req.body ?? {};
+  // ISS-003: require runtime and task; workPath optional (some agents run anywhere)
+  if (!String(runtime ?? '').trim()) {
+    res.status(400).json({ error: 'runtime is required' }); return;
+  }
+  if (!String(task ?? '').trim()) {
+    res.status(400).json({ error: 'task is required' }); return;
+  }
   const session = store.createSession({
-    runtime: String(runtime ?? 'unknown'),
+    runtime: String(runtime),
     workPath: String(workPath ?? ''),
-    task: String(task ?? ''),
+    task: String(task),
   });
   ok(res, { session });
 });
@@ -93,13 +110,17 @@ app.post('/api/sessions/:id/notify', (req: Request, res: Response) => {
 app.post('/api/sessions/:id/ask', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   if (!store.getSession(param(req,'id'))) return notFound(res);
+  // ISS-004: empty question blocks the session in 'waiting' with nothing to show
+  if (!String(req.body?.question ?? '').trim()) {
+    res.status(400).json({ error: 'question is required' }); return;
+  }
   store.touchSeen(param(req,'id'));
   const options = Array.isArray(req.body?.options)
     ? req.body.options.map(String)
     : null;
   const ask = store.createAsk({
     sessionId: param(req,'id'),
-    question: String(req.body?.question ?? ''),
+    question: String(req.body.question),
     options,
   });
   ok(res, { askId: ask.id, ask });
@@ -128,8 +149,13 @@ app.get('/api/asks/:askId', (req: Request, res: Response) => {
 
 app.post('/api/sessions/:id/status', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
+  // ISS-005: reject invalid status values explicitly rather than silently ignoring them
+  const status = String(req.body?.status ?? '');
+  if (!(SESSION_STATUSES as string[]).includes(status)) {
+    res.status(400).json({ error: `invalid status; must be one of: ${SESSION_STATUSES.join(', ')}` }); return;
+  }
   store.touchSeen(param(req,'id'));
-  const session = store.setStatus(param(req,'id'), String(req.body?.status ?? ''));
+  const session = store.setStatus(param(req,'id'), status);
   if (!session) return notFound(res);
   ok(res, { session });
 });
@@ -163,12 +189,17 @@ app.get('/api/sessions/:id/messages', (req: Request, res: Response) => {
 
 app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   if (!store.getSession(param(req,'id'))) return notFound(res);
+  // ISS-006: if caller supplies an askId, verify it exists and is still pending
+  // before writing anything, rather than silently degrading to free chat.
+  const rawAskId = req.body?.askId ? String(req.body.askId) : null;
+  if (rawAskId) {
+    const existing = store.getAsk(rawAskId);
+    if (!existing || existing.status !== 'pending') {
+      res.status(404).json({ error: 'ask not found or not pending' }); return;
+    }
+  }
   const text = String(req.body?.text ?? '');
-  const message = store.reply(
-    param(req,'id'),
-    text,
-    req.body?.askId ? String(req.body.askId) : null
-  );
+  const message = store.reply(param(req,'id'), text, rawAskId);
   // Deliver the message to the agent. The terminal IS the agent: if one is
   // running we type into it; if not, we spawn it on demand. Either way the
   // message reaches a real agent — no "offline"/"queued" dead-ends. The only
@@ -176,12 +207,14 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   // genuinely-autonomous agent already polling its own inbox.
   const session = store.getSession(param(req,'id'))!;
   let agent: 'online' | 'starting' | 'offline' | 'queued' = 'online';
-  const isAskAnswer = !!req.body?.askId;
+  const isAskAnswer = !!rawAskId;
 
   if (isAskAnswer) {
     // store.reply already resolved the pending ask + unblocked the agent.
   } else if (hasLivePty(session.id)) {
-    writeToPty(session.id, text); // existing live terminal
+    // ISS-010: check writeToPty return value — non-agent runtimes return false
+    // even when a PTY exists (e.g. bare cmd.exe shells). Don't claim 'online'.
+    if (!writeToPty(session.id, text)) agent = 'queued';
   } else if (isOnline(session)) {
     // An autonomous agent (MCP/skill) is actively polling its inbox; leave the
     // message for it to pick up rather than spawning a duplicate terminal.
@@ -205,8 +238,20 @@ app.post('/api/sessions/:id/start', (req: Request, res: Response) => {
 
 // In-app settings (no env vars).
 app.get('/api/settings', (_req: Request, res: Response) => ok(res, { settings: getSettings() }));
+const VALID_AUTO_START = ['ask', 'auto', 'off'] as const;
+const VALID_PERMISSIONS = [
+  'bypassPermissions', 'acceptEdits', 'default', 'plan',
+] as const;
+
 app.put('/api/settings', (req: Request, res: Response) => {
   const body = req.body ?? {};
+  // ISS-007: validate enum fields before writing
+  if (typeof body.autoStart === 'string' && !(VALID_AUTO_START as readonly string[]).includes(body.autoStart)) {
+    res.status(400).json({ error: `invalid autoStart; must be one of: ${VALID_AUTO_START.join(', ')}` }); return;
+  }
+  if (typeof body.startPermission === 'string' && !(VALID_PERMISSIONS as readonly string[]).includes(body.startPermission)) {
+    res.status(400).json({ error: `invalid startPermission; must be one of: ${VALID_PERMISSIONS.join(', ')}` }); return;
+  }
   const patch: Record<string, unknown> = {};
   if (typeof body.autoStart === 'string') patch.autoStart = body.autoStart;
   if (typeof body.startPermission === 'string') patch.startPermission = body.startPermission;
@@ -225,6 +270,11 @@ app.post('/api/asks/:askId/cancel', (req: Request, res: Response) => {
 app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   const id = param(req, 'id');
   if (!store.getSession(id)) return notFound(res);
+  // ISS-008: 400 if no recognised fields provided (hides misspelled field names)
+  const body = req.body ?? {};
+  if (!('title' in body) && typeof body.archived !== 'boolean') {
+    res.status(400).json({ error: 'no patchable fields in body; expected title or archived' }); return;
+  }
   let session = store.getSession(id)!;
   if ('title' in (req.body ?? {})) {
     const t = req.body.title;
@@ -328,12 +378,28 @@ const ptyWss = mountPtyWs(PLATFORM_TOKEN);
 
 server.on('upgrade', (req, socket, head) => {
   let pathname = '/';
+  let searchParams = new URLSearchParams();
   try {
-    pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+    const u = new URL(req.url ?? '/', 'http://localhost');
+    pathname = u.pathname;
+    searchParams = u.searchParams;
   } catch { /* keep default */ }
+
   if (pathname === '/ws') {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   } else if (pathname === '/pty') {
+    // ISS-012: reject at the TCP/HTTP layer before completing the WS handshake,
+    // so the client never sees an ephemeral 'open' event before the 1008 close.
+    if (PLATFORM_TOKEN) {
+      const tok =
+        searchParams.get('token') ??
+        (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+      if (tok !== PLATFORM_TOKEN) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
     ptyWss.handleUpgrade(req, socket, head, (ws) => ptyWss.emit('connection', ws, req));
   } else {
     socket.destroy();

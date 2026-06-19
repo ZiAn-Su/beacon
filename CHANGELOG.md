@@ -3,6 +3,50 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.5.5] - 2026-06-19
+
+### 修复(QA 发现的 14 个 issues 全量修复)
+
+#### P0 — 立即修
+
+- **ISS-005**: `POST /api/sessions/:id/status` 收到非法 status 值(如 `"banana"`)不再静默返回 200;
+  改为在 route 层校验 `SESSION_STATUSES` 枚举,越界返回 400 + 错误说明。
+- **ISS-010**: `/reply` 当 `hasLivePty=true` 但 `writeToPty` 返回 false 时(非 agent runtime 如
+  `cmd-test`)不再虚报 `agent:'online'`;改为读返回值,false → `agent:'queued'`。
+
+#### P1 — 尽快修
+
+- **ISS-003**: `POST /api/sessions/register` 接受空 body → 400(`runtime is required` /
+  `task is required`)。
+- **ISS-004**: `POST /api/sessions/:id/ask` 空 question → 400,不再把 session 卡进无内容
+  的 waiting 状态。
+- **ISS-006**: `POST /api/sessions/:id/reply` 提供的 `askId` 找不到或已 answered/cancelled → 404,
+  不再静默降级为 free chat(导致真 ask 永远 pending、agent 永远等)。
+- **ISS-011**: `/pty` WS 鉴权现在同时接受 `?token=` query param 和 `Authorization: Bearer …`
+  header,与 REST south API 保持一致。
+
+#### P2 — 常规 backlog
+
+- **ISS-007**: `PUT /api/settings` 校验 `autoStart`(`ask|auto|off`)和 `startPermission`
+  枚举白名单,越界返回 400。
+- **ISS-009**: 非法 JSON 请求体不再返回暴露服务器绝对路径的 HTML 堆栈页;Express 5 后挂
+  `entity.parse.failed` 错误中间件,统一返回 `{"error":"invalid json"}`。
+- **ISS-012**: `/pty` WS 的 token 校验从 `wss.on('connection')` 提前到 `server.on('upgrade')`
+  阶段,越权连接在 HTTP 层就被 `socket.write('HTTP/1.1 401…')` 拒掉,不再有瞬时 open 后 1008 的
+  问题。
+
+#### P3 — 可选
+
+- **ISS-008**: `PATCH /api/sessions/:id {}` 空 body 不再无声 200;返回 400
+  `"no patchable fields"`。
+- **ISS-013**: 去掉 `<html class="dark">` 硬编码;改为在 `<head>` 首位插入最小内联脚本
+  (`localStorage + prefers-color-scheme`)在首屏 paint 前设好 theme,浅色偏好用户不再有 FOUC。
+
+#### 已在此前版本修复(记录存档)
+
+- **ISS-001**(P2): 组件中硬编码中文已在 v0.5.3 迁入 i18n。
+- **ISS-002/014**(P1/P3): 进程版本不一致 = 未重启旧进程,无代码 bug。
+
 ## [0.5.4] - 2026-06-19
 
 ### 变更(把终端做成"永远在线",去掉断连/排队等摩擦状态)

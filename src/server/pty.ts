@@ -229,7 +229,11 @@ export function mountPtyWs(platformToken: string): WebSocketServer {
     const sessionId = url.searchParams.get('sessionId') ?? '';
 
     if (platformToken) {
-      const tok = url.searchParams.get('token') ?? '';
+      // ISS-011: accept both ?token= query param and Authorization header so
+      // clients can use the same auth style as the REST south API.
+      const tok =
+        url.searchParams.get('token') ??
+        (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
       if (tok !== platformToken) {
         ws.close(1008, 'Unauthorized');
         return;
