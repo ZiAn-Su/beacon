@@ -108,6 +108,11 @@ const en: Dict = {
   "settings.offDesc": "Don’t start anything; it’s delivered when the agent next runs.",
   "settings.done": "Done",
 
+  "info.openSession": "Open in terminal",
+  "info.openSessionDesc": "Resume this agent's conversation:",
+  "info.openSessionCopied": "Copied — paste in your terminal",
+  "info.openDir": "Open work folder",
+
   "info.status": "Status",
   "info.runtime": "Runtime",
   "info.workdir": "Working directory",
@@ -246,6 +251,11 @@ const zh: Dict = {
   "settings.off": "只把消息排队",
   "settings.offDesc": "不启动任何东西;等智能体下次运行时送达。",
   "settings.done": "完成",
+
+  "info.openSession": "在终端中打开",
+  "info.openSessionDesc": "在对应目录恢复这个智能体的对话：",
+  "info.openSessionCopied": "已复制 — 粘贴到终端执行",
+  "info.openDir": "打开工作目录",
 
   "info.status": "状态",
   "info.runtime": "运行时",

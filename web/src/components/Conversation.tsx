@@ -8,6 +8,7 @@ import { Composer } from "./Composer";
 import { EmptyState } from "./EmptyState";
 import { Loader2, MessageSquareText, Play, Power } from "lucide-react";
 import { useI18n } from "../lib/i18n";
+import { isOnline } from "../lib/format";
 
 interface Props {
   session: Session;
@@ -42,6 +43,13 @@ export function Conversation({
     setAgentState(null);
     setRemember(false);
   }, [session.id]);
+
+  // Auto-clear the "starting" banner when the agent comes online.
+  useEffect(() => {
+    if (agentState === "starting" && isOnline(session, now ?? Date.now())) {
+      setAgentState(null);
+    }
+  }, [agentState, session.lastSeenAt, now, session]);
 
   const handleSend = useCallback(
     async (sessionId: string, text: string, askId?: string | null) => {

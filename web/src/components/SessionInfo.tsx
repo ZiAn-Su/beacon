@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, Folder, History, Info, Play } from "lucide-react";
+import { Check, Copy, Folder, History, Info, Play, Terminal } from "lucide-react";
 import type { Session } from "../types";
 import { Avatar } from "./Avatar";
 import { pathBase, sessionName, absoluteTime, classNames, isOnline } from "../lib/format";
@@ -61,45 +61,29 @@ export function SessionInfo({ session, now }: Props) {
       <Divider />
 
       <div className="scroll-area flex-1 overflow-y-auto px-5 py-4">
-        {/* Status */}
+        {/* Status + presence in one row */}
         <SectionHeader>{t("info.status")}</SectionHeader>
         <Row
           icon={
             <span
               className="dot mt-1.5"
-              style={{ background: statusColor }}
+              style={{ background: online ? statusColor : "var(--text-muted)" }}
               aria-hidden
             />
           }
         >
           <span style={{ color: "var(--text)" }}>{statusLabel}</span>
-          {isWaiting && (
-            <span
-              className="ml-1.5 text-[11.5px]"
-              style={{ color: "var(--text-muted)" }}
-            >
-              {t("status.needsReply")}
+          <span
+            className="ml-2 text-[11.5px]"
+            style={{ color: online ? "var(--green)" : "var(--text-muted)" }}
+          >
+            · {online ? t("presence.running") : t("presence.notRunning")}
+          </span>
+          {isWaiting && online && (
+            <span className="ml-1 text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+              · {t("status.needsReply")}
             </span>
           )}
-        </Row>
-        <Row
-          icon={
-            <span
-              className="mt-1.5 inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                background: online ? "var(--green)" : "transparent",
-                border: online ? "none" : "1.5px solid var(--text-muted)",
-              }}
-              aria-hidden
-            />
-          }
-        >
-          <span style={{ color: online ? "var(--green)" : "var(--text-secondary)" }}>
-            {online ? t("status.online") : t("status.offline")}
-          </span>
-          <span className="ml-1.5 text-[11.5px]" style={{ color: "var(--text-muted)" }}>
-            {online ? t("presence.running") : t("presence.notRunning")}
-          </span>
         </Row>
 
         {/* Runtime */}
@@ -148,6 +132,14 @@ export function SessionInfo({ session, now }: Props) {
         >
           register · notify · ask · status · inbox
         </div>
+
+        {/* Open / resume the agent's session */}
+        {session.workPath && (
+          <>
+            <SectionHeader>{t("info.openSession")}</SectionHeader>
+            <OpenSessionRow session={session} />
+          </>
+        )}
       </div>
 
       <Divider />
@@ -212,6 +204,64 @@ function KeyValue({
       >
         {value}
       </span>
+    </div>
+  );
+}
+
+function resumeCommand(session: { runtime: string; workPath: string }): string {
+  if (session.runtime === "claude-code" || session.runtime === "claude") {
+    return `cd "${session.workPath}" && claude --continue`;
+  }
+  if (session.runtime === "codex") {
+    return `cd "${session.workPath}" && codex`;
+  }
+  return `cd "${session.workPath}"`;
+}
+
+function OpenSessionRow({ session }: { session: { runtime: string; workPath: string } }) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const cmd = resumeCommand(session);
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+        {t("info.openSessionDesc")}
+      </p>
+      <div
+        className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+        style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
+      >
+        <Terminal size={12} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+        <code
+          className="min-w-0 flex-1 truncate text-[11px]"
+          style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}
+          title={cmd}
+        >
+          {cmd}
+        </code>
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(cmd);
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 2000);
+            } catch { /* ignore */ }
+          }}
+          aria-label={copied ? t("info.openSessionCopied") : t("info.openSession")}
+          title={copied ? t("info.openSessionCopied") : t("info.openSession")}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+          style={{ color: copied ? "var(--green)" : "var(--text-muted)" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+        </button>
+      </div>
+      {copied && (
+        <p className="text-[11px]" style={{ color: "var(--green)" }}>
+          {t("info.openSessionCopied")}
+        </p>
+      )}
     </div>
   );
 }

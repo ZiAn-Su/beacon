@@ -122,22 +122,7 @@ export function ConversationHeader({
               </button>
             )}
           </span>
-          <StatusBadge status={session.status} />
-          <span
-            className="inline-flex items-center gap-1 text-[11.5px]"
-            style={{ color: online ? "var(--green)" : "var(--text-muted)" }}
-            title={online ? t("presence.running") : t("presence.notRunning")}
-          >
-            <span
-              className="inline-block h-1.5 w-1.5 rounded-full"
-              style={{
-                background: online ? "var(--green)" : "transparent",
-                border: online ? "none" : "1.5px solid var(--text-muted)",
-              }}
-              aria-hidden
-            />
-            {online ? t("status.online") : t("status.offline")}
-          </span>
+          <StatusBadge status={session.status} online={online} />
           {copied && (
             <span className="text-[11px]" style={{ color: "var(--green)" }}>
               {t("conv.copied")}

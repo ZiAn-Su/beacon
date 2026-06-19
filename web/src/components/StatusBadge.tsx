@@ -6,12 +6,13 @@ interface Props {
   status: SessionStatus;
   size?: "sm" | "md";
   withDot?: boolean;
+  online?: boolean; // when provided, dims the badge if offline
 }
 
-export function StatusBadge({ status, size = "sm", withDot = true }: Props) {
+export function StatusBadge({ status, size = "sm", withDot = true, online }: Props) {
   const { t } = useI18n();
-  const color = STATUS_COLOR[status];
-  const bg = STATUS_BG[status];
+  const color = online === false ? "var(--text-muted)" : STATUS_COLOR[status];
+  const bg = online === false ? "var(--surface-hover)" : STATUS_BG[status];
   return (
     <span
       className={classNames(
@@ -19,18 +20,25 @@ export function StatusBadge({ status, size = "sm", withDot = true }: Props) {
         size === "sm" ? "h-5 px-2 text-[11px]" : "h-6 px-2.5 text-xs",
       )}
       style={{
-        color: color,
+        color,
         background: bg,
         border: "1px solid var(--border)",
+        opacity: online === false ? 0.7 : 1,
       }}
+      title={online === false ? t("presence.notRunning") : undefined}
     >
       {withDot && (
         <span
-          className={classNames("dot", status === "working" && "working-dot")}
+          className={classNames("dot", status === "working" && online !== false && "working-dot")}
           style={{ background: color }}
         />
       )}
       {t(`status.${status}`)}
+      {online === false && (
+        <span style={{ color: "var(--text-muted)", fontWeight: 400 }}>
+          · {t("presence.notRunning")}
+        </span>
+      )}
     </span>
   );
 }

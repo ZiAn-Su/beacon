@@ -68,16 +68,15 @@ export function MessageItem({
     );
   }
 
-  // Human (chat or answer) - right-aligned accent-soft bubble
+  // Human (chat or answer) - right-aligned bubble, readable text
   return (
     <div className="flex justify-end">
       <div className="flex max-w-[80%] flex-col items-end gap-1.5">
         <div
           className="rounded-2xl rounded-tr-md px-3.5 py-2.5 text-sm leading-relaxed"
           style={{
-            background: "var(--accent-soft)",
-            color: "var(--accent)",
-            border: "1px solid var(--accent-soft)",
+            background: "var(--accent)",
+            color: "#fff",
             animation: "msg-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both",
             whiteSpace: "pre-wrap",
             wordBreak: "break-word",
@@ -125,19 +124,24 @@ function Timestamp({ time }: { time: number }) {
 
 function NotifyBubble({ text, ts }: { text: string; ts: number }) {
   return (
-    <div className="flex items-center gap-2 py-1 text-[12.5px] leading-relaxed"
-      style={{ color: "var(--text-muted)" }}
+    <div
+      className="flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[13px] leading-relaxed"
+      style={{
+        background: "var(--surface-card)",
+        border: "1px solid var(--border)",
+        color: "var(--text-secondary)",
+      }}
     >
       <span
-        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+        className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
         style={{
-          background: "var(--surface-card)",
+          background: "var(--surface-hover)",
           color: "var(--text-muted)",
           border: "1px solid var(--border)",
         }}
         aria-hidden
       >
-        <Bell size={10} />
+        <Bell size={9} />
       </span>
       <span
         className="min-w-0 flex-1"
@@ -148,7 +152,7 @@ function NotifyBubble({ text, ts }: { text: string; ts: number }) {
       <time
         dateTime={new Date(ts).toISOString()}
         title={absoluteTime(ts)}
-        className="shrink-0 text-[10.5px] tabular-nums"
+        className="mt-0.5 shrink-0 text-[10.5px] tabular-nums"
         style={{ color: "var(--text-muted)" }}
       >
         {shortTime(ts)}
