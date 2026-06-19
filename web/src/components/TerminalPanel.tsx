@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
   sessionId: string;
@@ -11,6 +12,7 @@ interface Props {
 // opened and silently auto-reconnects if the socket drops. There is no manual
 // "reconnect" or "offline" state for the user to manage.
 export function TerminalPanel({ sessionId }: Props) {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -167,7 +169,7 @@ export function TerminalPanel({ sessionId }: Props) {
               animation: "pulse-soft 1.2s ease-in-out infinite",
             }}
           />
-          重连中…
+          {t("terminal.reconnecting")}
         </div>
       )}
     </div>

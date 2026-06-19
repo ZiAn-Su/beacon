@@ -1,6 +1,7 @@
 import { Bell, Bot, Check, User2 } from "lucide-react";
 import type { Message } from "../types";
 import { absoluteTime, shortTime } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import { AskCard } from "./AskCard";
 
 interface Props {
@@ -19,6 +20,7 @@ export function MessageItem({
   pendingAskIds,
   isLast,
 }: Props) {
+  const { t } = useI18n();
   if (message.kind === "status") {
     return <StatusLine text={message.text} />;
   }
@@ -89,7 +91,7 @@ export function MessageItem({
           {isLast && <Timestamp time={message.createdAt} />}
           {showDelivery && message.deliveredAt != null && (
             <span
-              title={`已送达 ${new Date(message.deliveredAt).toLocaleTimeString()}`}
+              title={`${t("msg.delivered")} ${new Date(message.deliveredAt).toLocaleTimeString()}`}
               style={{ color: "var(--green)" }}
             >
               <Check size={11} />
