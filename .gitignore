@@ -5,6 +5,7 @@ data/
 *.db
 *.db-wal
 *.db-shm
+*.tsbuildinfo
 .env
 .DS_Store
 web/dist
