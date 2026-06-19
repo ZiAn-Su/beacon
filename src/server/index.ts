@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty } from './pty';
 import { startAgent, isOnline, canStart } from './wake';
 import { getSettings, setSettings } from '../core/settings';
 
@@ -169,12 +169,21 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
     text,
     req.body?.askId ? String(req.body.askId) : null
   );
-  // Decide what happens for the agent. If it's online, nothing to do. If it's
-  // offline, behaviour follows the in-app setting: start it automatically, ask
-  // the user (the UI shows a one-click prompt), or just queue.
+  // Decide what happens for the agent.
   const session = store.getSession(param(req,'id'))!;
   let agent: 'online' | 'starting' | 'offline' | 'queued' = 'online';
-  if (!isOnline(session)) {
+  const isAskAnswer = !!req.body?.askId;
+
+  if (!isAskAnswer && hasLivePty(session.id)) {
+    // The embedded terminal IS the agent. Type the message straight into it so
+    // it appears in the live terminal and the agent acts on it. Never spawn a
+    // separate headless process — that would conflict with this session.
+    writeToPty(session.id, text);
+    agent = 'online';
+  } else if (!isOnline(session)) {
+    // No live terminal and the agent hasn't pinged Beacon recently. Behaviour
+    // follows the in-app setting: start it automatically, offer a one-click
+    // prompt, or just queue the message.
     const canRelaunch = canStart(session.runtime);
     const mode = getSettings().autoStart;
     if (mode === 'auto' && canRelaunch) {

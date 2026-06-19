@@ -35,9 +35,41 @@ interface LivePty {
   cols: number;
   rows: number;
   idleTimer: NodeJS.Timeout | null;
+  heartbeat: NodeJS.Timeout | null;
 }
 
 const live = new Map<string, LivePty>();
+
+/** Is there a live interactive terminal (PTY) for this session right now? */
+export function hasLivePty(sessionId: string): boolean {
+  return live.has(sessionId);
+}
+
+/**
+ * Deliver a human message into the live terminal as if typed into the agent,
+ * then submit it (Enter). Returns false if no live PTY exists. This is how a
+ * Beacon chat message reaches the interactive claude/codex running in the
+ * embedded terminal — the terminal IS the agent, so we type into it rather than
+ * spawning a separate headless process.
+ */
+export function writeToPty(sessionId: string, text: string): boolean {
+  const entry = live.get(sessionId);
+  if (!entry) return false;
+  // Collapse newlines to spaces so a multi-line paste doesn't submit early in
+  // the TUI composer; then send Enter to submit.
+  const oneLine = text.replace(/\r?\n/g, ' ').trim();
+  if (!oneLine) return false;
+  try {
+    entry.proc.write(oneLine);
+    // Small gap lets the TUI register the paste before the submit keystroke.
+    setTimeout(() => {
+      try { entry.proc.write('\r'); } catch { /* exited */ }
+    }, 60);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function spawnTarget(runtime: string): SpawnTarget {
   const wrap = (cmd: string): SpawnTarget =>
@@ -90,8 +122,17 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     cols,
     rows,
     idleTimer: null,
+    heartbeat: null,
   };
   live.set(sessionId, entry);
+
+  // While a terminal is open, keep the session's presence "online" — the
+  // interactive agent doesn't call Beacon's south API itself, so without this
+  // it would look offline and /reply would try to spawn a conflicting process.
+  store.touchSeen(sessionId);
+  entry.heartbeat = setInterval(() => {
+    if (entry.clients.size > 0) store.touchSeen(sessionId);
+  }, 30_000);
 
   proc.onData((data: string) => {
     entry.buffer += data;
@@ -112,6 +153,7 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
       }
     }
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    if (entry.heartbeat) clearInterval(entry.heartbeat);
     live.delete(sessionId);
   });
 
@@ -186,6 +228,7 @@ export function mountPtyWs(platformToken: string): WebSocketServer {
       if (entry.clients.size === 0 && !entry.idleTimer) {
         entry.idleTimer = setTimeout(() => {
           try { entry.proc.kill(); } catch { /* already exited */ }
+          if (entry.heartbeat) clearInterval(entry.heartbeat);
           live.delete(sessionId);
         }, IDLE_KILL_MS);
       }

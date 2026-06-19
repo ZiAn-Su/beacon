@@ -3,6 +3,20 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.5.3] - 2026-06-19
+
+### 修复(人机交互核心,重要)
+
+- **发消息后终端无反应 + 智能体"自动关闭"。** 根因:Beacon 消息通道与嵌入终端是两条互不相通的链路。
+  你发的消息进了 store,但终端里的交互 claude 不轮询 inbox 看不到;同时终端 claude 不调用 Beacon,
+  presence 判它"离线",`/reply` 又 spawn 了一个 headless `claude --continue --print` 去同一目录恢复
+  同一对话——两个 claude 冲突,headless 那个跑完一轮就退出,看起来就是"自动关闭"。
+- **现在:终端就是智能体。** 当某 session 有活的终端 PTY 时,你发的聊天消息直接写入它的 stdin
+  (等同于替你在 claude 里输入并回车),消息真正进入终端、智能体据此行动;**绝不再 spawn 冲突进程**。
+  - `src/server/pty.ts` 新增 `hasLivePty()` / `writeToPty()`;`/reply` 优先走终端注入。
+  - 终端打开期间维持 session presence "在线"(30s 心跳 `touchSeen`),交互 claude 自身不调 Beacon
+    也不会被误判离线。ask 的回答仍走原长轮询通道,不注入终端。
+
 ## [0.5.2] - 2026-06-19
 
 ### 变更 / 修复
