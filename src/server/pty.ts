@@ -34,11 +34,23 @@ interface LivePty {
   clients: Set<WebSocket>;
   cols: number;
   rows: number;
+  spawnedAt: number;
+  pending: string[]; // messages queued while the TUI is still booting
   idleTimer: NodeJS.Timeout | null;
   heartbeat: NodeJS.Timeout | null;
 }
 
+// How long after spawn we treat the TUI as "still booting" — messages sent in
+// this window are queued and flushed once it's ready, so they don't get dropped
+// before the input box exists.
+const BOOT_MS = 3500;
+
 const live = new Map<string, LivePty>();
+
+/** Runtimes Beacon knows how to drive as an agent (vs. a bare shell). */
+function isAgentRuntime(runtime: string): boolean {
+  return runtime === 'claude-code' || runtime === 'claude' || runtime === 'codex';
+}
 
 /** Is there a live interactive terminal (PTY) for this session right now? */
 export function hasLivePty(sessionId: string): boolean {
@@ -46,29 +58,64 @@ export function hasLivePty(sessionId: string): boolean {
 }
 
 /**
- * Deliver a human message into the live terminal as if typed into the agent,
- * then submit it (Enter). Returns false if no live PTY exists. This is how a
- * Beacon chat message reaches the interactive claude/codex running in the
- * embedded terminal — the terminal IS the agent, so we type into it rather than
- * spawning a separate headless process.
+ * Ensure an interactive agent terminal exists for this session, spawning one on
+ * demand if needed. Returns false only for runtimes we can't launch as an agent
+ * (so the caller can fall back to queuing). This is what makes "send a message"
+ * always reach a real agent — no "offline"/"queued" dead-ends.
  */
-export function writeToPty(sessionId: string, text: string): boolean {
-  const entry = live.get(sessionId);
-  if (!entry) return false;
-  // Collapse newlines to spaces so a multi-line paste doesn't submit early in
-  // the TUI composer; then send Enter to submit.
-  const oneLine = text.replace(/\r?\n/g, ' ').trim();
-  if (!oneLine) return false;
+export function ensurePty(sessionId: string): boolean {
+  if (live.has(sessionId)) return true;
+  const session = store.getSession(sessionId);
+  if (!session || !isAgentRuntime(session.runtime)) return false;
+  const r = getOrSpawn(sessionId);
+  if ('error' in r) return false;
+  // Spawned with no viewing client yet; arm the idle reaper so an unwatched
+  // process doesn't live forever.
+  armIdle(sessionId, r);
+  return true;
+}
+
+function armIdle(sessionId: string, entry: LivePty): void {
+  if (entry.clients.size === 0 && !entry.idleTimer) {
+    entry.idleTimer = setTimeout(() => {
+      try { entry.proc.kill(); } catch { /* already exited */ }
+      if (entry.heartbeat) clearInterval(entry.heartbeat);
+      live.delete(sessionId);
+    }, IDLE_KILL_MS);
+  }
+}
+
+function submit(entry: LivePty, oneLine: string): void {
   try {
     entry.proc.write(oneLine);
-    // Small gap lets the TUI register the paste before the submit keystroke.
     setTimeout(() => {
       try { entry.proc.write('\r'); } catch { /* exited */ }
     }, 60);
-    return true;
-  } catch {
-    return false;
+  } catch { /* exited */ }
+}
+
+/**
+ * Deliver a human message into the session's terminal as if typed into the
+ * agent, then submit it (Enter). Spawns the terminal on demand if none exists.
+ * If the TUI is still booting, the message is queued and flushed when ready.
+ * Returns false only for runtimes Beacon can't launch.
+ */
+export function writeToPty(sessionId: string, text: string): boolean {
+  if (!ensurePty(sessionId)) return false;
+  const entry = live.get(sessionId);
+  if (!entry) return false;
+  // Collapse newlines to spaces so a multi-line paste doesn't submit early in
+  // the TUI composer.
+  const oneLine = text.replace(/\r?\n/g, ' ').trim();
+  if (!oneLine) return false;
+
+  if (Date.now() - entry.spawnedAt < BOOT_MS) {
+    // Still booting — queue; the flush timer (set at spawn) delivers it.
+    entry.pending.push(oneLine);
+  } else {
+    submit(entry, oneLine);
   }
+  return true;
 }
 
 function spawnTarget(runtime: string): SpawnTarget {
@@ -112,6 +159,7 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
       } as Record<string, string>,
     });
   } catch (err) {
+    console.error(`[pty] spawn failed for ${sessionId} (${file} ${args.join(' ')}):`, err);
     return { error: `Failed to start: ${String(err)}` };
   }
 
@@ -121,10 +169,21 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     clients: new Set(),
     cols,
     rows,
+    spawnedAt: Date.now(),
+    pending: [],
     idleTimer: null,
     heartbeat: null,
   };
   live.set(sessionId, entry);
+
+  // Flush any messages queued while the TUI was booting, once it's ready.
+  setTimeout(() => {
+    const e = live.get(sessionId);
+    if (!e) return;
+    const queued = e.pending;
+    e.pending = [];
+    for (const line of queued) submit(e, line);
+  }, BOOT_MS);
 
   // While a terminal is open, keep the session's presence "online" — the
   // interactive agent doesn't call Beacon's south API itself, so without this
@@ -225,13 +284,7 @@ export function mountPtyWs(platformToken: string): WebSocketServer {
       entry.clients.delete(ws);
       // Keep the PTY alive for fast re-attach. Only kill after a long idle with
       // no clients, so we don't leak processes for sessions nobody returns to.
-      if (entry.clients.size === 0 && !entry.idleTimer) {
-        entry.idleTimer = setTimeout(() => {
-          try { entry.proc.kill(); } catch { /* already exited */ }
-          if (entry.heartbeat) clearInterval(entry.heartbeat);
-          live.delete(sessionId);
-        }, IDLE_KILL_MS);
-      }
+      armIdle(sessionId, entry);
     });
   });
 

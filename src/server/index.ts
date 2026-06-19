@@ -16,7 +16,7 @@ import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { mountMcpHttp } from './mcp-http';
 import { mountPtyWs, hasLivePty, writeToPty } from './pty';
-import { startAgent, isOnline, canStart } from './wake';
+import { startAgent, isOnline } from './wake';
 import { getSettings, setSettings } from '../core/settings';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -169,31 +169,27 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
     text,
     req.body?.askId ? String(req.body.askId) : null
   );
-  // Decide what happens for the agent.
+  // Deliver the message to the agent. The terminal IS the agent: if one is
+  // running we type into it; if not, we spawn it on demand. Either way the
+  // message reaches a real agent — no "offline"/"queued" dead-ends. The only
+  // exceptions: an ask answer (resolved via the long-poll channel), and a
+  // genuinely-autonomous agent already polling its own inbox.
   const session = store.getSession(param(req,'id'))!;
   let agent: 'online' | 'starting' | 'offline' | 'queued' = 'online';
   const isAskAnswer = !!req.body?.askId;
 
-  if (!isAskAnswer && hasLivePty(session.id)) {
-    // The embedded terminal IS the agent. Type the message straight into it so
-    // it appears in the live terminal and the agent acts on it. Never spawn a
-    // separate headless process — that would conflict with this session.
-    writeToPty(session.id, text);
-    agent = 'online';
-  } else if (!isOnline(session)) {
-    // No live terminal and the agent hasn't pinged Beacon recently. Behaviour
-    // follows the in-app setting: start it automatically, offer a one-click
-    // prompt, or just queue the message.
-    const canRelaunch = canStart(session.runtime);
-    const mode = getSettings().autoStart;
-    if (mode === 'auto' && canRelaunch) {
-      startAgent(session, text, getSettings().startPermission);
-      agent = 'starting';
-    } else if (mode === 'ask' && canRelaunch) {
-      agent = 'offline'; // UI offers a "start it?" button
-    } else {
-      agent = 'queued';
-    }
+  if (isAskAnswer) {
+    // store.reply already resolved the pending ask + unblocked the agent.
+  } else if (hasLivePty(session.id)) {
+    writeToPty(session.id, text); // existing live terminal
+  } else if (isOnline(session)) {
+    // An autonomous agent (MCP/skill) is actively polling its inbox; leave the
+    // message for it to pick up rather than spawning a duplicate terminal.
+  } else if (writeToPty(session.id, text)) {
+    // No agent anywhere — start an interactive terminal on demand and type into
+    // it. Output is buffered until the user opens the Terminal view.
+  } else {
+    agent = 'queued'; // runtime we can't launch (rare)
   }
   ok(res, { message, agent });
 });
