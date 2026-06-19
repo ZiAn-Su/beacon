@@ -4,10 +4,12 @@ import {
   ChevronLeft,
   Copy,
   Folder,
+  MessageSquareText,
   MoreVertical,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
+  Terminal,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "../types";
@@ -26,6 +28,8 @@ interface Props {
   infoOpen?: boolean;
   onToggleInfo?: () => void;
   canToggleInfo?: boolean;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 export function ConversationHeader({
@@ -36,6 +40,8 @@ export function ConversationHeader({
   infoOpen,
   onToggleInfo,
   canToggleInfo,
+  terminalOpen,
+  onToggleTerminal,
 }: Props) {
   const { t } = useI18n();
   const { renameSession, setArchived } = useStore();
@@ -131,6 +137,13 @@ export function ConversationHeader({
         </div>
       </div>
 
+      {onToggleTerminal && (
+        <ViewToggle
+          terminalOpen={!!terminalOpen}
+          onToggle={onToggleTerminal}
+        />
+      )}
+
       {canToggleInfo && onToggleInfo && (
         <button
           onClick={onToggleInfo}
@@ -185,6 +198,52 @@ export function ConversationHeader({
         />
       )}
     </header>
+  );
+}
+
+function ViewToggle({
+  terminalOpen,
+  onToggle,
+}: {
+  terminalOpen: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  const tabs = [
+    { key: false, icon: <MessageSquareText size={14} />, label: t("conv.viewMessages") },
+    { key: true,  icon: <Terminal size={14} />,          label: t("conv.viewTerminal") },
+  ] as const;
+  return (
+    <div
+      className="flex items-center overflow-hidden rounded-lg"
+      style={{ border: "1px solid var(--border)", background: "var(--surface-card)" }}
+    >
+      {tabs.map(({ key, icon, label }) => {
+        const active = terminalOpen === key;
+        return (
+          <button
+            key={String(key)}
+            onClick={() => { if (!active) onToggle(); }}
+            aria-label={label}
+            title={label}
+            className="flex h-8 items-center gap-1.5 px-2.5 text-[12px] font-medium transition-colors"
+            style={{
+              color: active ? "var(--accent)" : "var(--text-secondary)",
+              background: active ? "var(--accent-soft)" : "transparent",
+            }}
+            onMouseEnter={(e) => {
+              if (!active) e.currentTarget.style.background = "var(--surface-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = active ? "var(--accent-soft)" : "transparent";
+            }}
+          >
+            {icon}
+            <span className="hidden sm:inline">{label}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

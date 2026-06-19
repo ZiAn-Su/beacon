@@ -57,6 +57,8 @@ const en: Dict = {
   "conv.rename": "Rename",
   "conv.archive": "Archive",
   "conv.unarchive": "Unarchive",
+  "conv.viewMessages": "Messages",
+  "conv.viewTerminal": "Terminal",
 
   "rename.title": "Rename conversation",
   "rename.desc": "Set a display name. Leave it empty to use the agent’s task.",
@@ -197,6 +199,8 @@ const zh: Dict = {
   "conv.back": "返回列表",
   "conv.showInfo": "显示会话信息",
   "conv.hideInfo": "隐藏会话信息",
+  "conv.viewMessages": "消息",
+  "conv.viewTerminal": "终端",
   "conv.menu": "会话操作",
   "conv.rename": "重命名",
   "conv.archive": "归档",

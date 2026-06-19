@@ -15,6 +15,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { mountMcpHttp } from './mcp-http';
+import { mountPtyWs } from './pty';
 import { startAgent, isOnline, canStart } from './wake';
 import { getSettings, setSettings } from '../core/settings';
 
@@ -314,6 +315,7 @@ if (existsSync(WEB_DIST)) {
 // ----------------------------------------------------------------------------
 const server = createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
+mountPtyWs(server, PLATFORM_TOKEN);
 
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'hello', sessions: store.listSessions() }));

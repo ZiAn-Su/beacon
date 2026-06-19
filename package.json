@@ -1,6 +1,6 @@
 {
   "name": "beacon",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Beacon: humans and AI agents talk over a neutral, runtime-agnostic bus. Agents plug in via MCP; the human side reuses a mature IM (Matrix/Element) or a built-in dev console.",
@@ -22,6 +22,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^12.11.1",
     "express": "^5.2.1",
+    "node-pty": "^1.1.0",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },

@@ -3,6 +3,24 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.5.0] - 2026-06-19
+
+### 新增
+
+- **嵌入式终端(Embedded Terminal)**。对话界面头部新增「消息 | 终端」切换标签。点「终端」直接在
+  Beacon 界面里打开 xterm.js 终端,运行 `claude --continue`(claude-code)、`codex`(codex)
+  或交互式 shell(其他 runtime),体验与在本地终端里操作完全一致。
+  - 后端:新增 `/pty` WebSocket 端点(`src/server/pty.ts`),基于 `node-pty`(ConPTY on Windows)
+    给每个连接分配独立 PTY 进程;自动注入 `BEACON_SESSION_ID` 环境变量让 agent 归属正确 session。
+  - 前端:新增 `TerminalPanel.tsx`(xterm.js + FitAddon),GitHub 暗色主题,
+    ResizeObserver 自动发 resize 消息,连接断开后显示提示。
+  - Vite 开发代理新增 `/pty` 路径;生产下 PTY WS 与 REST 共享同一端口。
+
+### 变更
+
+- **移除"正在启动智能体"banner 及离线提示栏。** 不再弹出启动提示:
+  有了嵌入终端,用户直接点「终端」标签启动 agent,不需要额外的"启动"按钮流程。
+
 ## [0.4.3] - 2026-06-19
 
 ### 新增
