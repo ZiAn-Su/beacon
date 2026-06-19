@@ -314,8 +314,26 @@ if (existsSync(WEB_DIST)) {
 // WebSocket: push live session + message events to all connected clients
 // ----------------------------------------------------------------------------
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
-mountPtyWs(server, PLATFORM_TOKEN);
+// Both WS endpoints share one HTTP server. We must use noServer mode and route
+// the `upgrade` event by path ourselves — if two WebSocketServer instances each
+// bind via the `server` option, the first one rejects upgrades for the other's
+// path with a 400 before the right one can handle them.
+const wss = new WebSocketServer({ noServer: true });
+const ptyWss = mountPtyWs(PLATFORM_TOKEN);
+
+server.on('upgrade', (req, socket, head) => {
+  let pathname = '/';
+  try {
+    pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+  } catch { /* keep default */ }
+  if (pathname === '/ws') {
+    wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  } else if (pathname === '/pty') {
+    ptyWss.handleUpgrade(req, socket, head, (ws) => ptyWss.emit('connection', ws, req));
+  } else {
+    socket.destroy();
+  }
+});
 
 wss.on('connection', (ws) => {
   ws.send(JSON.stringify({ type: 'hello', sessions: store.listSessions() }));

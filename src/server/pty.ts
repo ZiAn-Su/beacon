@@ -3,7 +3,6 @@
 // running the session's agent (claude --continue, codex, etc.) in its workPath.
 import { WebSocketServer, WebSocket } from 'ws';
 import type { IncomingMessage } from 'node:http';
-import type { Server } from 'node:http';
 import * as pty from 'node-pty';
 import { URL } from 'node:url';
 import * as store from '../core/store';
@@ -30,8 +29,10 @@ function spawnTarget(runtime: string): SpawnTarget {
     : { file: process.env.SHELL ?? 'bash', args: [] };
 }
 
-export function mountPtyWs(httpServer: Server, platformToken: string): void {
-  const wss = new WebSocketServer({ server: httpServer, path: '/pty' });
+export function mountPtyWs(platformToken: string): WebSocketServer {
+  // noServer mode: the caller routes the `upgrade` event by path. (Binding via
+  // the `server` option alongside the /ws server causes 400s — see index.ts.)
+  const wss = new WebSocketServer({ noServer: true });
 
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -103,4 +104,6 @@ export function mountPtyWs(httpServer: Server, platformToken: string): void {
       try { proc.kill(); } catch { /* already exited */ }
     });
   });
+
+  return wss;
 }

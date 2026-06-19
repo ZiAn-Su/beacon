@@ -3,6 +3,14 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.5.1] - 2026-06-19
+
+### 修复
+
+- **终端 WebSocket 连接失败(400)。** `/ws` 和 `/pty` 两个 WebSocketServer 都用 `{ server }` 选项
+  挂在同一 HTTP server 上时,`/ws` 的实例会先拦截 `/pty` 的升级请求并以 400 拒绝,导致终端永远连不上。
+  改为两者都用 `noServer: true`,由单个 `upgrade` 事件按 pathname 手动路由。
+
 ## [0.5.0] - 2026-06-19
 
 ### 新增
