@@ -32,6 +32,7 @@ export interface Message {
   askId: string | null;
   meta: { options?: string[] } | null;
   createdAt: number;
+  deliveredAt: number | null;
 }
 
 export type WsEvent =

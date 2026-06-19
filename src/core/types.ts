@@ -49,6 +49,7 @@ export interface Message {
   askId: string | null; // set for kind 'ask' and 'answer'
   meta: Record<string, unknown> | null; // e.g. ask options
   createdAt: number;
+  deliveredAt: number | null; // when agent first read it via check_inbox
 }
 
 export type AskStatus = 'pending' | 'answered' | 'cancelled';

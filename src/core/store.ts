@@ -70,6 +70,7 @@ function ensureColumn(table: string, column: string, decl: string): void {
 ensureColumn('sessions', 'title', 'TEXT');
 ensureColumn('sessions', 'archivedAt', 'INTEGER');
 ensureColumn('sessions', 'lastSeenAt', 'INTEGER');
+ensureColumn('messages', 'deliveredAt', 'INTEGER');
 
 const now = () => Date.now();
 
@@ -84,6 +85,7 @@ interface MessageRow {
   askId: string | null;
   meta: string | null;
   createdAt: number;
+  deliveredAt: number | null;
 }
 interface AskRow {
   id: string;
@@ -106,6 +108,7 @@ function mapMessage(r: MessageRow): Message {
     askId: r.askId,
     meta: r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : null,
     createdAt: r.createdAt,
+    deliveredAt: r.deliveredAt ?? null,
   };
 }
 function mapAsk(r: AskRow): Ask {
@@ -230,8 +233,11 @@ export function touchSeen(id: string): void {
 
 // ---------- messages ----------
 const insertMessage = db.prepare(
-  `INSERT INTO messages (id, sessionId, direction, kind, text, askId, meta, createdAt)
-   VALUES (@id, @sessionId, @direction, @kind, @text, @askId, @meta, @createdAt)`
+  `INSERT INTO messages (id, sessionId, direction, kind, text, askId, meta, createdAt, deliveredAt)
+   VALUES (@id, @sessionId, @direction, @kind, @text, @askId, @meta, @createdAt, @deliveredAt)`
+);
+const markMessageDelivered = db.prepare(
+  `UPDATE messages SET deliveredAt = @deliveredAt WHERE id = @id AND deliveredAt IS NULL`
 );
 const selectMessages = db.prepare(
   `SELECT * FROM messages WHERE sessionId = ? ORDER BY createdAt ASC`
@@ -259,6 +265,7 @@ export function addMessage(input: {
     askId: input.askId ?? null,
     meta: input.meta ?? null,
     createdAt: now(),
+    deliveredAt: null,
   };
   insertMessage.run({
     ...m,
@@ -273,9 +280,19 @@ export function messages(sessionId: string): Message[] {
   return (selectMessages.all(sessionId) as MessageRow[]).map(mapMessage);
 }
 
-/** Human chat messages newer than `afterTs` — for an agent's check_inbox poll. */
+/** Human chat messages newer than `afterTs` — for an agent's check_inbox poll.
+ *  Marks returned messages as delivered (first read) and pushes WS events. */
 export function inbox(sessionId: string, afterTs: number): Message[] {
-  return (selectInbox.all(sessionId, afterTs) as MessageRow[]).map(mapMessage);
+  const msgs = (selectInbox.all(sessionId, afterTs) as MessageRow[]).map(mapMessage);
+  const ts = now();
+  for (const m of msgs) {
+    if (m.deliveredAt == null) {
+      markMessageDelivered.run({ id: m.id, deliveredAt: ts });
+      m.deliveredAt = ts;
+      bus.emit('message', m);
+    }
+  }
+  return msgs;
 }
 
 // ---------- asks (blocking questions) ----------

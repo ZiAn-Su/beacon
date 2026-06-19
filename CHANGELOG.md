@@ -3,6 +3,17 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.4.3] - 2026-06-19
+
+### 新增
+
+- **消息已送达确认(✓)**。人发出的 chat 消息,一旦 agent 调用 `check_inbox` 读取,
+  气泡右下角即刻出现绿色 `✓` 图标,悬停可看送达时间。
+  - 后端:messages 表新增 `deliveredAt INTEGER` 字段(additive migration,不破坏已有数据);
+    `inbox()` 返回时 SQL 批量打标记并通过 bus 推 WS 事件。
+  - 前端:WS `message` 事件改为 upsert(相同 id → in-place 更新),使 deliveredAt 能实时反映。
+  - `answer` 类消息(ask 的回答)不需要此标记,因为它通过长轮询直接唤醒 agent。
+
 ## [0.4.0] - 2026-06-19
 
 ### 变更(产品化:把"启动离线智能体"做成界面操作,不再用环境变量)

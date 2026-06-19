@@ -171,9 +171,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const m = e.message;
         setMessagesBySession((prev) => {
           const list = prev[m.sessionId] ?? [];
-          // Avoid duplicates if the server echoes a message we already
-          // optimistically added.
-          if (list.some((x) => x.id === m.id)) return prev;
+          const idx = list.findIndex((x) => x.id === m.id);
+          if (idx >= 0) {
+            // Update existing message in place (e.g. deliveredAt newly set).
+            const next = list.slice();
+            next[idx] = m;
+            return { ...prev, [m.sessionId]: next };
+          }
           return { ...prev, [m.sessionId]: [...list, m] };
         });
         // Bump the session's updatedAt so contacts re-sort naturally.

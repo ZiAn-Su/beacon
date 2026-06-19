@@ -1,4 +1,4 @@
-import { Bell, Bot, User2 } from "lucide-react";
+import { Bell, Bot, Check, User2 } from "lucide-react";
 import type { Message } from "../types";
 import { absoluteTime, shortTime } from "../lib/format";
 import { AskCard } from "./AskCard";
@@ -69,6 +69,7 @@ export function MessageItem({
   }
 
   // Human (chat or answer) - right-aligned bubble, readable text
+  const showDelivery = message.direction === "human" && message.kind === "chat";
   return (
     <div className="flex justify-end">
       <div className="flex max-w-[80%] flex-col items-end gap-1.5">
@@ -84,7 +85,17 @@ export function MessageItem({
         >
           {message.text}
         </div>
-        {isLast && <Timestamp time={message.createdAt} />}
+        <div className="flex items-center gap-1">
+          {isLast && <Timestamp time={message.createdAt} />}
+          {showDelivery && message.deliveredAt != null && (
+            <span
+              title={`已送达 ${new Date(message.deliveredAt).toLocaleTimeString()}`}
+              style={{ color: "var(--green)" }}
+            >
+              <Check size={11} />
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
