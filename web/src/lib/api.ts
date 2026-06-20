@@ -11,6 +11,11 @@ async function json<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+export async function getHealth(): Promise<{ version: string }> {
+  const r = await fetch("/api/health");
+  return json<{ ok: boolean; version: string; ts: number }>(r);
+}
+
 export async function listSessions(): Promise<Session[]> {
   const r = await fetch("/api/sessions");
   const data = await json<{ sessions: Session[] }>(r);

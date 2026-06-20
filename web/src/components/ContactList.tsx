@@ -5,6 +5,7 @@ import { ContactCard } from "./ContactCard";
 import { EmptyState } from "./EmptyState";
 import { useStore } from "../lib/store";
 import { useI18n } from "../lib/i18n";
+import { getHealth } from "../lib/api";
 
 interface Props {
   sessions: Session[];
@@ -41,6 +42,18 @@ export function ContactList({
   }, []);
 
   const { unreadBySession, hasPendingAsk } = useStore();
+
+  // Show the running backend's version so it's obvious which build is live.
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getHealth()
+      .then((h) => alive && setVersion(h.version))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const active = sessions.filter((s) => s.archivedAt == null);
   const archived = sessions.filter((s) => s.archivedAt != null);
@@ -124,6 +137,19 @@ export function ContactList({
               <div className="truncate text-sm font-semibold text-strong">
                 Beacon
               </div>
+              {version && (
+                <span
+                  className="rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums"
+                  style={{
+                    color: "var(--text-secondary)",
+                    background: "var(--surface-card)",
+                    border: "1px solid var(--border)",
+                  }}
+                  title={`Beacon v${version}`}
+                >
+                  v{version}
+                </span>
+              )}
               <span
                 className="hidden sm:inline text-[10.5px] font-medium uppercase tracking-wider"
                 style={{ color: "var(--text-muted)" }}
