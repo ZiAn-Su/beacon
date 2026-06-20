@@ -78,7 +78,7 @@ function agentAuthOk(req: Request, res: Response): boolean {
 // ----------------------------------------------------------------------------
 app.post('/api/sessions/register', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
-  const { runtime, workPath, task } = req.body ?? {};
+  const { runtime, workPath, task, bindKey, name, origin } = req.body ?? {};
   // ISS-003: require runtime and task; workPath optional (some agents run anywhere)
   if (!String(runtime ?? '').trim()) {
     res.status(400).json({ error: 'runtime is required' }); return;
@@ -86,12 +86,17 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
   if (!String(task ?? '').trim()) {
     res.status(400).json({ error: 'task is required' }); return;
   }
-  const session = store.createSession({
+  // Identity Phase 1: optional bindKey (continuation), name (display title) and
+  // origin ('agent'|'human'; anything else falls back to 'agent').
+  const session = store.registerOrClaim({
     runtime: String(runtime),
     workPath: String(workPath ?? ''),
     task: String(task),
+    bindKey: bindKey != null ? String(bindKey) : null,
+    origin: origin === 'human' ? 'human' : 'agent',
+    name: name != null ? String(name) : null,
   });
-  ok(res, { session });
+  ok(res, { session, agentId: session.id });
 });
 
 app.post('/api/sessions/:id/notify', (req: Request, res: Response) => {

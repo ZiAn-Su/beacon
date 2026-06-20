@@ -14,6 +14,8 @@ import type {
   MsgKind,
   Ask,
   AskStatus,
+  Owner,
+  TrustTier,
 } from './types';
 import { SESSION_STATUSES } from './types';
 
@@ -56,6 +58,12 @@ CREATE TABLE IF NOT EXISTS asks (
   createdAt INTEGER NOT NULL,
   answeredAt INTEGER
 );
+CREATE TABLE IF NOT EXISTS owner (
+  id TEXT PRIMARY KEY,
+  name TEXT,
+  token TEXT,
+  createdAt INTEGER NOT NULL
+);
 `);
 
 // Additive migrations: bring older databases (created before a column existed)
@@ -71,11 +79,64 @@ ensureColumn('sessions', 'title', 'TEXT');
 ensureColumn('sessions', 'archivedAt', 'INTEGER');
 ensureColumn('sessions', 'lastSeenAt', 'INTEGER');
 ensureColumn('messages', 'deliveredAt', 'INTEGER');
+// Identity Phase 1 — additive session columns. Null on pre-existing rows; the
+// read-time mapper (mapSession) supplies sane defaults, so no backfill UPDATE.
+ensureColumn('sessions', 'bindKey', 'TEXT');
+ensureColumn('sessions', 'origin', 'TEXT');
+ensureColumn('sessions', 'guardianId', 'TEXT');
+ensureColumn('sessions', 'trustTier', 'TEXT');
 
 const now = () => Date.now();
 
+// ---------- owner (guardian) ----------
+const selectOwner = db.prepare(`SELECT * FROM owner LIMIT 1`);
+const insertOwner = db.prepare(
+  `INSERT INTO owner (id, name, token, createdAt) VALUES (@id, @name, @token, @createdAt)`
+);
+
+/**
+ * Ensures exactly one Owner row exists and returns it. Called once at module
+ * load; seeds an owner whose token defaults to PLATFORM_TOKEN when set.
+ */
+export function ensureOwner(): Owner {
+  const existing = selectOwner.get() as Owner | undefined;
+  if (existing) return existing;
+  const o: Owner = {
+    id: randomUUID(),
+    name: null,
+    token: process.env.PLATFORM_TOKEN ?? null,
+    createdAt: now(),
+  };
+  insertOwner.run(o);
+  return o;
+}
+
+let owner = ensureOwner();
+
+/** The single platform owner / guardian. */
+export function getOwner(): Owner {
+  return owner;
+}
+
 // ---------- row mappers ----------
-type SessionRow = Omit<Session, never>;
+// Raw shape as stored: the identity columns are nullable on rows written before
+// the migration, so they come back possibly-null and get defaulted in mapSession.
+interface SessionRow {
+  id: string;
+  runtime: string;
+  workPath: string;
+  task: string;
+  status: SessionStatus;
+  title: string | null;
+  archivedAt: number | null;
+  lastSeenAt: number | null;
+  bindKey: string | null;
+  origin: string | null;
+  guardianId: string | null;
+  trustTier: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
 interface MessageRow {
   id: string;
   sessionId: string;
@@ -96,6 +157,26 @@ interface AskRow {
   answer: string | null;
   createdAt: number;
   answeredAt: number | null;
+}
+
+// Defaults the additive identity columns at read time: old rows have them NULL.
+function mapSession(r: SessionRow): Session {
+  return {
+    id: r.id,
+    runtime: r.runtime,
+    workPath: r.workPath,
+    task: r.task,
+    status: r.status,
+    title: r.title ?? null,
+    archivedAt: r.archivedAt ?? null,
+    lastSeenAt: r.lastSeenAt ?? null,
+    bindKey: r.bindKey ?? null,
+    origin: r.origin === 'human' ? 'human' : 'agent',
+    guardianId: r.guardianId ?? null,
+    trustTier: (r.trustTier ?? 'standard') as TrustTier,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
 }
 
 function mapMessage(r: MessageRow): Message {
@@ -126,11 +207,14 @@ function mapAsk(r: AskRow): Ask {
 
 // ---------- sessions ----------
 const insertSession = db.prepare(
-  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, lastSeenAt, createdAt, updatedAt)
-   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @lastSeenAt, @createdAt, @updatedAt)`
+  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, lastSeenAt, bindKey, origin, guardianId, trustTier, createdAt, updatedAt)
+   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @lastSeenAt, @bindKey, @origin, @guardianId, @trustTier, @createdAt, @updatedAt)`
 );
 const selectSession = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
 const selectSessions = db.prepare(`SELECT * FROM sessions ORDER BY updatedAt DESC`);
+const selectSessionByBindKey = db.prepare(
+  `SELECT * FROM sessions WHERE bindKey = ? ORDER BY updatedAt DESC LIMIT 1`
+);
 const updateSessionStatus = db.prepare(
   `UPDATE sessions SET status = @status, updatedAt = @updatedAt WHERE id = @id`
 );
@@ -148,17 +232,25 @@ export function createSession(input: {
   runtime: string;
   workPath: string;
   task: string;
+  bindKey?: string | null;
+  origin?: 'agent' | 'human';
+  name?: string | null;
 }): Session {
   const ts = now();
+  const title = input.name && input.name.trim() ? input.name.trim() : null;
   const s: Session = {
     id: randomUUID(),
     runtime: input.runtime || 'unknown',
     workPath: input.workPath || '',
     task: input.task || '',
     status: 'registered',
-    title: null,
+    title,
     archivedAt: null,
     lastSeenAt: ts,
+    bindKey: input.bindKey ?? null,
+    origin: input.origin === 'human' ? 'human' : 'agent',
+    guardianId: getOwner().id,
+    trustTier: 'standard',
     createdAt: ts,
     updatedAt: ts,
   };
@@ -168,11 +260,40 @@ export function createSession(input: {
 }
 
 export function getSession(id: string): Session | undefined {
-  return selectSession.get(id) as SessionRow | undefined;
+  const r = selectSession.get(id) as SessionRow | undefined;
+  return r ? mapSession(r) : undefined;
 }
 
 export function listSessions(): Session[] {
-  return selectSessions.all() as SessionRow[];
+  return (selectSessions.all() as SessionRow[]).map(mapSession);
+}
+
+/**
+ * The register "find-or-create": when a bindKey is supplied and matches an
+ * existing session, continue it (re-mark working, bump presence) and return the
+ * same id; otherwise create a fresh session.
+ */
+export function registerOrClaim(input: {
+  runtime: string;
+  workPath: string;
+  task: string;
+  bindKey?: string | null;
+  origin?: 'agent' | 'human';
+  name?: string | null;
+}): Session {
+  const key = input.bindKey && input.bindKey.trim() ? input.bindKey : null;
+  if (key) {
+    const existing = selectSessionByBindKey.get(key) as SessionRow | undefined;
+    if (existing) {
+      const ts = now();
+      updateSeen.run({ id: existing.id, lastSeenAt: ts });
+      updateSessionStatus.run({ id: existing.id, status: 'working', updatedAt: ts });
+      const continued = getSession(existing.id)!;
+      bus.emit('session', continued);
+      return continued;
+    }
+  }
+  return createSession(input);
 }
 
 export function setStatus(id: string, status: string): Session | undefined {

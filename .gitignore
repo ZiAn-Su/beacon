@@ -17,3 +17,6 @@ web/node_modules
 
 # private: local agent guidance / internal workflow notes — not for publication
 /CLAUDE.md
+
+# private: BCG company internal — strategy, comms, board materials. NEVER open-source.
+/company/

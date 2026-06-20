@@ -18,6 +18,26 @@ export const SESSION_STATUSES: SessionStatus[] = [
   'done',
 ];
 
+// Trust tier graduates how much an agent contact is allowed to do. Phase 1
+// stores it but enforces nothing; authorization arrives in a later phase.
+export type TrustTier = 'restricted' | 'standard' | 'trusted' | 'autonomous';
+
+export const TRUST_TIERS: TrustTier[] = [
+  'restricted',
+  'standard',
+  'trusted',
+  'autonomous',
+];
+
+// The platform owner / guardian: the human a session is accountable to. One row
+// is ensured at startup; sessions are bound to it via `guardianId`.
+export interface Owner {
+  id: string;
+  name: string | null;
+  token: string | null;
+  createdAt: number;
+}
+
 export interface Session {
   id: string;
   runtime: string; // "claude-code" | "codex" | ...
@@ -27,6 +47,10 @@ export interface Session {
   title: string | null; // human-set display name; overrides `task` when present
   archivedAt: number | null; // when archived (hidden from active list), else null
   lastSeenAt: number | null; // last time the agent talked to Beacon (presence)
+  bindKey: string | null; // continuation credential; null = anonymous one-shot
+  origin: 'agent' | 'human'; // 'agent' self-registered | 'human' pre-created
+  guardianId: string | null; // Owner.id this session is accountable to
+  trustTier: TrustTier; // graduated trust; defaults to 'standard' at read time
   createdAt: number;
   updatedAt: number;
 }
