@@ -175,15 +175,20 @@ app.get('/api/sessions/:id/inbox', (req: Request, res: Response) => {
 
 // --- agent -> agent (peer) ---
 // Per-pair authorization: resolvePeerPermission folds the global master switch
-// (agentComm 'off'), any exact-pair grant, and the sender's trust tier into a
-// single allow/deny (most-specific wins). Call after both sessions are known to
-// exist. Deny -> 403.
+// (agentComm 'off'), any exact-pair grant, the sender's trust tier, and the
+// default visible scope (same working directory) into allow/deny/approval
+// (most-specific wins). Call after both sessions are known to exist.
 function peerAuthOk(res: Response, fromId: string, toId: string): boolean {
-  if (store.resolvePeerPermission(fromId, toId) === 'deny') {
-    res.status(403).json({ error: 'not authorized to contact this agent' });
+  const verdict = store.resolvePeerPermission(fromId, toId);
+  if (verdict === 'allow') return true;
+  if (verdict === 'approval') {
+    // Eligible but not yet authorized. Phase 2 turns this into an
+    // agent-initiated request that surfaces to the guardian for approval.
+    res.status(403).json({ error: 'contact requires guardian approval', need: 'approval' });
     return false;
   }
-  return true;
+  res.status(403).json({ error: 'not authorized to contact this agent' });
+  return false;
 }
 
 // Non-blocking agent->agent FYI. body { targetId, text }.
@@ -249,9 +254,17 @@ app.get('/api/sessions', (_req: Request, res: Response) => {
   ok(res, { sessions: store.listSessions() });
 });
 
-// Agent directory — every contact (single-user => all sessions), each carrying
-// guardianId / trustTier / origin / bindKey. No scope filtering yet.
-app.get('/api/agents', (_req: Request, res: Response) => {
+// Agent directory. Human side (no query) => every contact. Agent-side discovery
+// passes ?visibleTo=<sessionId> and gets only that agent's visible scope (same
+// working directory + its allow-granted peers), so an agent never enumerates the
+// whole roster — addressing range = visibility range.
+app.get('/api/agents', (req: Request, res: Response) => {
+  const visibleTo = req.query.visibleTo;
+  if (visibleTo != null) {
+    const id = Array.isArray(visibleTo) ? String(visibleTo[0]) : String(visibleTo);
+    ok(res, { agents: store.visibleAgentsFor(id) });
+    return;
+  }
   ok(res, { agents: store.listSessions() });
 });
 

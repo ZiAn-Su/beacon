@@ -728,18 +728,76 @@ export function getGrantForPair(fromId: string, toId: string): Grant | undefined
   return selectGrantByPair.get(fromId, toId) as Grant | undefined;
 }
 
+// Normalize a work path for scope comparison: unify slashes, drop trailing
+// slash, lowercase (paths are case-insensitive on Windows; harmless elsewhere).
+function normWorkPath(p: string): string {
+  return (p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * Default visibility scope: two agents see each other when they share a working
+ * directory — identical path, or one nested under the other. Empty paths never
+ * match (an agent with no workPath has no default peers). workPath is a
+ * discovery attribute here, never an identity key.
+ */
+export function isVisibleScope(aPath: string, bPath: string): boolean {
+  const a = normWorkPath(aPath);
+  const b = normWorkPath(bPath);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.startsWith(b + '/') || b.startsWith(a + '/');
+}
+
+/**
+ * The agents `sessionId` may discover (its address book): those in its default
+ * visible scope (same working directory) plus any it holds an explicit
+ * allow-grant toward. Excludes itself and archived contacts.
+ */
+export function visibleAgentsFor(sessionId: string): Session[] {
+  const self = getSession(sessionId);
+  if (!self) return [];
+  const granted = new Set(
+    listGrants()
+      .filter((g) => g.fromId === sessionId && g.effect === 'allow')
+      .map((g) => g.toId),
+  );
+  return listSessions().filter(
+    (s) =>
+      s.id !== sessionId &&
+      s.archivedAt == null &&
+      (isVisibleScope(self.workPath, s.workPath) || granted.has(s.id)),
+  );
+}
+
 /**
  * Decide whether `fromId` may initiate peer messaging to `toId`. Most-specific
- * wins, pure (no side effects):
- *   1. global master switch off -> deny (highest priority).
- *   2. an exact-pair grant -> its effect.
- *   3. else the sender's trust tier: 'restricted' -> deny, otherwise allow.
+ * wins, pure (no side effects). Three outcomes:
+ *   - 'allow'    : deliver directly.
+ *   - 'deny'     : refuse.
+ *   - 'approval' : not yet authorized, but eligible — the caller should raise a
+ *                  guardian approval (agent-initiated contact request).
+ * Order:
+ *   1. global master switch off            -> deny.
+ *   2. an exact-pair grant                 -> its effect (allow/deny).
+ *   3. sender tier autonomous              -> allow; restricted -> deny.
+ *   4. standard|trusted need the target in the sender's visible scope
+ *      (reach outside it only via an explicit allow grant, handled at step 2);
+ *      not visible -> deny.
+ *   5. visible: trusted -> allow; standard -> approval.
  */
-export function resolvePeerPermission(fromId: string, toId: string): 'allow' | 'deny' {
+export function resolvePeerPermission(
+  fromId: string,
+  toId: string,
+): 'allow' | 'deny' | 'approval' {
   if (getSettings().agentComm === 'off') return 'deny';
   const grant = getGrantForPair(fromId, toId);
   if (grant) return grant.effect;
   const from = getSession(fromId);
-  const tier = from?.trustTier ?? 'standard';
-  return tier === 'restricted' ? 'deny' : 'allow';
+  const to = getSession(toId);
+  if (!from || !to) return 'deny';
+  const tier = from.trustTier ?? 'standard';
+  if (tier === 'autonomous') return 'allow';
+  if (tier === 'restricted') return 'deny';
+  if (!isVisibleScope(from.workPath, to.workPath)) return 'deny';
+  return tier === 'trusted' ? 'allow' : 'approval';
 }

@@ -50,8 +50,8 @@ function storeOps(): AgentOps {
         askId: m.askId,
       }));
     },
-    async listAgents() {
-      return store.listSessions().map((s) => ({
+    async listAgents(forId: string) {
+      return store.visibleAgentsFor(forId).map((s) => ({
         id: s.id,
         task: s.task,
         status: s.status,

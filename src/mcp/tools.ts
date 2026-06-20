@@ -31,7 +31,7 @@ export interface AgentOps {
       askId?: string | null;
     }[]
   >;
-  listAgents(): Promise<{ id: string; task: string; status: string; runtime: string }[]>;
+  listAgents(forId: string): Promise<{ id: string; task: string; status: string; runtime: string }[]>;
   peerNotify(fromId: string, targetId: string, text: string): Promise<void>;
   peerAsk(
     fromId: string,
@@ -208,10 +208,10 @@ export function registerBeaconTools(
     },
     async () => {
       const id = await ensure();
-      const agents = (await ops.listAgents()).filter((a) => a.id !== id);
+      const agents = (await ops.listAgents(id)).filter((a) => a.id !== id);
       const text = agents.length
         ? agents.map((a) => `${a.id} — ${a.task} [${a.status}]`).join('\n')
-        : '(no other agents are registered)';
+        : '(no other agents are visible to you)';
       return { content: [{ type: 'text', text }] };
     },
   );
@@ -372,10 +372,10 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
       }>(`/api/sessions/${id}/inbox?after=${after}`);
       return messages;
     },
-    async listAgents() {
+    async listAgents(forId: string) {
       const { agents } = await api<{
         agents: { id: string; task: string; status: string; runtime: string }[];
-      }>('/api/agents');
+      }>(`/api/agents?visibleTo=${encodeURIComponent(forId)}`);
       return agents.map((a) => ({
         id: a.id,
         task: a.task,
