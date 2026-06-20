@@ -15,9 +15,18 @@ export interface Settings {
   // Permission level the started agent runs under (maps to Claude
   // --permission-mode). bypassPermissions lets it actually do the work.
   startPermission: string;
+  // Global agent-to-agent messaging switch (single guardian, no per-grant scope
+  // yet — that's a later phase):
+  //   open - peer-notify / peer-ask are allowed (default)
+  //   off  - both are refused with 403
+  agentComm: 'open' | 'off';
 }
 
-const DEFAULTS: Settings = { autoStart: 'ask', startPermission: 'bypassPermissions' };
+const DEFAULTS: Settings = {
+  autoStart: 'ask',
+  startPermission: 'bypassPermissions',
+  agentComm: 'open',
+};
 
 let cache: Settings | null = null;
 
@@ -35,6 +44,7 @@ export function setSettings(patch: Partial<Settings>): Settings {
   const next: Settings = { ...getSettings(), ...patch };
   // Validate enum.
   if (!['ask', 'auto', 'off'].includes(next.autoStart)) next.autoStart = 'ask';
+  if (!['open', 'off'].includes(next.agentComm)) next.agentComm = 'open';
   cache = next;
   try {
     mkdirSync(dirname(PATH), { recursive: true });

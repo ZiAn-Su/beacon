@@ -62,7 +62,8 @@ export type MsgDirection = 'agent' | 'human';
 // answer  : human -> agent, reply that resolves an Ask
 // chat    : free-form message either direction
 // status  : system line recording a status change
-export type MsgKind = 'notify' | 'ask' | 'answer' | 'chat' | 'status';
+// peer    : agent -> agent, carried on the recipient session's thread
+export type MsgKind = 'notify' | 'ask' | 'answer' | 'chat' | 'status' | 'peer';
 
 export interface Message {
   id: string;
@@ -70,6 +71,8 @@ export interface Message {
   direction: MsgDirection;
   kind: MsgKind;
   text: string;
+  // The originating session for an agent->agent 'peer' message; null otherwise.
+  fromSessionId: string | null;
   askId: string | null; // set for kind 'ask' and 'answer'
   meta: Record<string, unknown> | null; // e.g. ask options
   createdAt: number;

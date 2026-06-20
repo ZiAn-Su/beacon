@@ -85,6 +85,9 @@ ensureColumn('sessions', 'bindKey', 'TEXT');
 ensureColumn('sessions', 'origin', 'TEXT');
 ensureColumn('sessions', 'guardianId', 'TEXT');
 ensureColumn('sessions', 'trustTier', 'TEXT');
+// Identity Phase 3 — agent->agent peer messages. NULL on pre-existing rows and
+// on human/agent messages; only set for kind 'peer'. Defaulted at read time.
+ensureColumn('messages', 'fromSessionId', 'TEXT');
 
 const now = () => Date.now();
 
@@ -143,6 +146,7 @@ interface MessageRow {
   direction: MsgDirection;
   kind: MsgKind;
   text: string;
+  fromSessionId: string | null;
   askId: string | null;
   meta: string | null;
   createdAt: number;
@@ -186,6 +190,7 @@ function mapMessage(r: MessageRow): Message {
     direction: r.direction,
     kind: r.kind,
     text: r.text,
+    fromSessionId: r.fromSessionId ?? null,
     askId: r.askId,
     meta: r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : null,
     createdAt: r.createdAt,
@@ -354,18 +359,26 @@ export function touchSeen(id: string): void {
 
 // ---------- messages ----------
 const insertMessage = db.prepare(
-  `INSERT INTO messages (id, sessionId, direction, kind, text, askId, meta, createdAt, deliveredAt)
-   VALUES (@id, @sessionId, @direction, @kind, @text, @askId, @meta, @createdAt, @deliveredAt)`
+  `INSERT INTO messages (id, sessionId, direction, kind, text, fromSessionId, askId, meta, createdAt, deliveredAt)
+   VALUES (@id, @sessionId, @direction, @kind, @text, @fromSessionId, @askId, @meta, @createdAt, @deliveredAt)`
 );
 const markMessageDelivered = db.prepare(
   `UPDATE messages SET deliveredAt = @deliveredAt WHERE id = @id AND deliveredAt IS NULL`
 );
+// A session's full thread also includes peer messages it sent (matched by
+// fromSessionId), so the sender can see its own outgoing agent->agent lines.
 const selectMessages = db.prepare(
-  `SELECT * FROM messages WHERE sessionId = ? ORDER BY createdAt ASC`
+  `SELECT * FROM messages WHERE sessionId = ? OR fromSessionId = ? ORDER BY createdAt ASC`
 );
+// Inbox = human chat addressed to me, OR a peer message another agent sent me
+// (kind 'peer' carried on my session with a non-null fromSessionId).
 const selectInbox = db.prepare(
   `SELECT * FROM messages
-   WHERE sessionId = ? AND direction = 'human' AND kind = 'chat' AND createdAt > ?
+   WHERE createdAt > ?
+     AND (
+       (sessionId = ? AND direction = 'human' AND kind = 'chat')
+       OR (sessionId = ? AND kind = 'peer' AND fromSessionId IS NOT NULL)
+     )
    ORDER BY createdAt ASC`
 );
 
@@ -374,6 +387,7 @@ export function addMessage(input: {
   direction: MsgDirection;
   kind: MsgKind;
   text: string;
+  fromSessionId?: string | null;
   askId?: string | null;
   meta?: Record<string, unknown> | null;
 }): Message {
@@ -383,6 +397,7 @@ export function addMessage(input: {
     direction: input.direction,
     kind: input.kind,
     text: input.text,
+    fromSessionId: input.fromSessionId ?? null,
     askId: input.askId ?? null,
     meta: input.meta ?? null,
     createdAt: now(),
@@ -398,13 +413,13 @@ export function addMessage(input: {
 }
 
 export function messages(sessionId: string): Message[] {
-  return (selectMessages.all(sessionId) as MessageRow[]).map(mapMessage);
+  return (selectMessages.all(sessionId, sessionId) as MessageRow[]).map(mapMessage);
 }
 
 /** Human chat messages newer than `afterTs` — for an agent's check_inbox poll.
  *  Marks returned messages as delivered (first read) and pushes WS events. */
 export function inbox(sessionId: string, afterTs: number): Message[] {
-  const msgs = (selectInbox.all(sessionId, afterTs) as MessageRow[]).map(mapMessage);
+  const msgs = (selectInbox.all(afterTs, sessionId, sessionId) as MessageRow[]).map(mapMessage);
   const ts = now();
   for (const m of msgs) {
     if (m.deliveredAt == null) {
@@ -539,4 +554,100 @@ export function cancelAsk(askId: string): Ask | undefined {
   const cancelled = getAsk(askId)!;
   flushWaiters(cancelled);
   return cancelled;
+}
+
+// ---------- agent -> agent (peer) ----------
+// Peer messaging reuses the existing message log + ask/waiter/long-poll infra.
+// A peer message is one row carried on the *recipient's* thread, with
+// fromSessionId pointing back at the sender (so the sender's thread includes it
+// via messages()'s `OR fromSessionId = ?`).
+
+/**
+ * Non-blocking agent->agent FYI. Both sessions must exist (else throws, gateway
+ * maps to 404). Returns the message (addMessage already emits + touches toId).
+ */
+export function peerNotify(fromId: string, toId: string, text: string): Message {
+  if (!getSession(fromId)) throw new Error('session not found');
+  if (!getSession(toId)) throw new Error('session not found');
+  return addMessage({
+    sessionId: toId,
+    fromSessionId: fromId,
+    direction: 'agent',
+    kind: 'peer',
+    text,
+  });
+}
+
+/**
+ * Blocking agent->agent question. The ask belongs to the *asker* (fromId) — it
+ * is the one that blocks and long-polls. We INSERT the ask row directly rather
+ * than via createAsk(), because createAsk surfaces the question as an
+ * agent->human ask on the asker's own thread; here the question must instead be
+ * delivered as a peer message to the recipient.
+ */
+export function peerAsk(
+  fromId: string,
+  toId: string,
+  question: string,
+  options: string[] | null
+): Ask {
+  if (!getSession(fromId)) throw new Error('session not found');
+  if (!getSession(toId)) throw new Error('session not found');
+  const ask: Ask = {
+    id: randomUUID(),
+    sessionId: fromId,
+    question,
+    options,
+    status: 'pending',
+    answer: null,
+    createdAt: now(),
+    answeredAt: null,
+  };
+  insertAsk.run({
+    ...ask,
+    options: ask.options ? JSON.stringify(ask.options) : null,
+  });
+  setStatus(fromId, 'waiting');
+  // Deliver the question to the recipient as a peer message carrying the askId.
+  addMessage({
+    sessionId: toId,
+    fromSessionId: fromId,
+    direction: 'agent',
+    kind: 'peer',
+    text: question,
+    askId: ask.id,
+    meta: options ? { options } : null,
+  });
+  return ask;
+}
+
+/**
+ * The recipient answers a peer-ask, unblocking the asker's long-poll. If the
+ * ask is missing or no longer pending, returns it unchanged (gateway maps to
+ * 404/409). The answer is posted back as a peer message on the asker's thread.
+ */
+export function agentAnswer(
+  askId: string,
+  text: string,
+  fromId?: string | null
+): Ask | undefined {
+  const ask = getAsk(askId);
+  if (!ask || ask.status !== 'pending') return ask;
+  // The answer is carried on the asker's thread (ask.sessionId = asker). Its
+  // fromSessionId points back at the answerer (the recipient of the question),
+  // so the asker's messages() shows the answer attributed to that peer.
+  addMessage({
+    sessionId: ask.sessionId,
+    fromSessionId: fromId ?? null,
+    direction: 'agent',
+    kind: 'peer',
+    text,
+    askId,
+  });
+  updateAskAnswer.run({ id: askId, answer: text, answeredAt: now() });
+  const askerId = ask.sessionId;
+  const session = getSession(askerId);
+  if (session && session.status === 'waiting') setStatus(askerId, 'working');
+  flushWaiters(getAsk(askId)!);
+  return getAsk(askId);
 }

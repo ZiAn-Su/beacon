@@ -173,11 +173,84 @@ app.get('/api/sessions/:id/inbox', (req: Request, res: Response) => {
   ok(res, { messages: store.inbox(param(req,'id'), after) });
 });
 
+// --- agent -> agent (peer) ---
+// Minimal authorization gate: a single global switch (single guardian, no
+// per-grant scope yet). When 'off', peer messaging is refused.
+function agentCommOk(res: Response): boolean {
+  if (getSettings().agentComm === 'off') {
+    res.status(403).json({ error: 'agent-to-agent messaging disabled' });
+    return false;
+  }
+  return true;
+}
+
+// Non-blocking agent->agent FYI. body { targetId, text }.
+app.post('/api/sessions/:id/peer-notify', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  if (!agentCommOk(res)) return;
+  const targetId = String(req.body?.targetId ?? '');
+  const text = String(req.body?.text ?? '');
+  if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  if (!store.getSession(param(req, 'id'))) return notFound(res);
+  if (!store.getSession(targetId)) return notFound(res);
+  store.touchSeen(param(req, 'id'));
+  try {
+    const message = store.peerNotify(param(req, 'id'), targetId, text);
+    ok(res, { message });
+  } catch {
+    notFound(res);
+  }
+});
+
+// Blocking agent->agent question. body { targetId, question, options? }. The
+// asker then long-polls the EXISTING GET /api/asks/:askId/wait endpoint.
+app.post('/api/sessions/:id/peer-ask', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  if (!agentCommOk(res)) return;
+  const targetId = String(req.body?.targetId ?? '');
+  if (!String(req.body?.question ?? '').trim()) {
+    res.status(400).json({ error: 'question is required' }); return;
+  }
+  if (!store.getSession(param(req, 'id'))) return notFound(res);
+  if (!store.getSession(targetId)) return notFound(res);
+  store.touchSeen(param(req, 'id'));
+  const options = Array.isArray(req.body?.options)
+    ? req.body.options.map(String)
+    : null;
+  try {
+    const ask = store.peerAsk(param(req, 'id'), targetId, String(req.body.question), options);
+    ok(res, { askId: ask.id });
+  } catch {
+    notFound(res);
+  }
+});
+
+// The recipient answers a peer-ask, unblocking the asker. body { askId, text }.
+// :id is the answerer (recorded as the answer's fromSessionId).
+app.post('/api/sessions/:id/peer-reply', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const askId = String(req.body?.askId ?? '');
+  const text = String(req.body?.text ?? '');
+  if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  const existing = store.getAsk(askId);
+  if (!existing) { res.status(404).json({ error: 'ask not found' }); return; }
+  if (existing.status !== 'pending') { res.status(409).json({ error: 'ask not pending' }); return; }
+  store.touchSeen(param(req, 'id'));
+  store.agentAnswer(askId, text, param(req, 'id'));
+  ok(res, { ok: true });
+});
+
 // ----------------------------------------------------------------------------
 // North API — consumed by the human-facing UI
 // ----------------------------------------------------------------------------
 app.get('/api/sessions', (_req: Request, res: Response) => {
   ok(res, { sessions: store.listSessions() });
+});
+
+// Agent directory — every contact (single-user => all sessions), each carrying
+// guardianId / trustTier / origin / bindKey. No scope filtering yet.
+app.get('/api/agents', (_req: Request, res: Response) => {
+  ok(res, { agents: store.listSessions() });
 });
 
 app.get('/api/sessions/:id', (req: Request, res: Response) => {
@@ -247,6 +320,7 @@ const VALID_AUTO_START = ['ask', 'auto', 'off'] as const;
 const VALID_PERMISSIONS = [
   'bypassPermissions', 'acceptEdits', 'default', 'plan',
 ] as const;
+const VALID_AGENT_COMM = ['open', 'off'] as const;
 
 app.put('/api/settings', (req: Request, res: Response) => {
   const body = req.body ?? {};
@@ -257,9 +331,13 @@ app.put('/api/settings', (req: Request, res: Response) => {
   if (typeof body.startPermission === 'string' && !(VALID_PERMISSIONS as readonly string[]).includes(body.startPermission)) {
     res.status(400).json({ error: `invalid startPermission; must be one of: ${VALID_PERMISSIONS.join(', ')}` }); return;
   }
+  if (typeof body.agentComm === 'string' && !(VALID_AGENT_COMM as readonly string[]).includes(body.agentComm)) {
+    res.status(400).json({ error: `invalid agentComm; must be one of: ${VALID_AGENT_COMM.join(', ')}` }); return;
+  }
   const patch: Record<string, unknown> = {};
   if (typeof body.autoStart === 'string') patch.autoStart = body.autoStart;
   if (typeof body.startPermission === 'string') patch.startPermission = body.startPermission;
+  if (typeof body.agentComm === 'string') patch.agentComm = body.agentComm;
   ok(res, { settings: setSettings(patch) });
 });
 
