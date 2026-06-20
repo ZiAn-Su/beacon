@@ -3,6 +3,40 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.0] - 2026-06-20
+
+### 新增 —— 智能体身份、智能体间通信、授权(全部向后兼容、增量迁移)
+
+按 `docs/identity-design.md` 顶层设计落地,旧 agent 接入零感知。
+
+#### 身份与监护
+
+- 新增 `owner` 表:启动即确保唯一监护人(token 默认取 `PLATFORM_TOKEN`)。
+- 每个 session(= 联系人)获得稳定身份字段:`bindKey`(续接凭证)、`origin`、`guardianId`、`trustTier`,
+  均经 `ensureColumn` 增量迁移(旧库原地升级、读时默认兜底)。
+- `register` 支持可选 `bindKey`(命中即续接同一联系人)、`name`、`origin`,响应新增 `agentId`。
+
+#### 智能体间通信(agent ↔ agent)
+
+- 新增 peer 语义,全程经平台中转、人侧可见:`notify_agent`(非阻塞)、`ask_agent`(阻塞,复用既有
+  ask 长轮询)、`answer_agent`、`list_agents`。MCP 两路(stdio + 托管 HTTP)与零配置 skill CLI
+  (`agents` / `notify-agent` / `ask-agent` / `answer-agent`)均已支持。
+- 端点:`POST /api/sessions/:id/{peer-notify,peer-ask,peer-reply}`、`GET /api/agents`。
+- 前端:peer 消息以独立气泡渲染(`发往/来自 <agent>` + 问题角标),收发双方对话都实时更新。
+
+#### 授权
+
+- 每个 agent 的**信任档位**(`restricted | standard | trusted | autonomous`)+ **逐对 Grant**
+  (allow/deny):`resolvePeerPermission` 最具体者胜(全局闸 > 逐对 Grant > 发起方档位)。
+- 端点:`GET/POST /api/grants`、`DELETE /api/grants/:id`;`PATCH /api/sessions/:id` 支持 `trustTier`;
+  `settings.agentComm` 全局总闸。
+- 前端:Settings 全局通信开关 + 每个 agent 的信任档位选择器。
+
+### 验证
+
+- `npm run e2e` / `npm run e2e:http` 全回归通过(human↔agent 与 5 个原 MCP 工具零破坏)。
+- agent↔agent 全链路(后端 + MCP 两路 + skill CLI)与授权矩阵端到端实测;前端经浏览器实机 QA。
+
 ## [0.5.5] - 2026-06-19
 
 ### 修复(QA 发现的 14 个 issues 全量修复)
