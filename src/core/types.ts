@@ -48,6 +48,10 @@ export interface Session {
   archivedAt: number | null; // when archived (hidden from active list), else null
   lastSeenAt: number | null; // last time the agent talked to Beacon (presence)
   bindKey: string | null; // continuation credential; null = anonymous one-shot
+  // The runtime's own session id (e.g. CLAUDE_CODE_SESSION_ID), when the agent
+  // reports it. Enables precise `--resume <id>`; not an identity key. Null when
+  // unknown (older rows, runtimes that don't expose one).
+  nativeSessionId: string | null;
   origin: 'agent' | 'human'; // 'agent' self-registered | 'human' pre-created
   guardianId: string | null; // Owner.id this session is accountable to
   trustTier: TrustTier; // graduated trust; defaults to 'standard' at read time

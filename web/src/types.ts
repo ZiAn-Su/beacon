@@ -24,6 +24,8 @@ export interface Session {
   // Who brought this contact into being: a self-registering agent, or a human.
   // Optional for forward-compat; defaults to "agent".
   origin?: "agent" | "human";
+  // The runtime's own session id, when reported. Enables precise `--resume`.
+  nativeSessionId?: string | null;
   createdAt: number;
   updatedAt: number;
 }

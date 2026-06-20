@@ -3,6 +3,17 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.3] - 2026-06-20
+
+### 新增 —— 捕获运行时原生 session id(精确恢复 + 资料展示)
+
+- 实测确认 Claude Code 经 `CLAUDE_CODE_SESSION_ID` 把自己的会话 id 注入子进程。MCP server 与零配置
+  skill 在 register 时读取并上报(`AGENT_SESSION_ID` 可显式覆盖,`CODEX_SESSION_ID` 兜底 codex)。
+- Session 新增 `nativeSessionId`(`ensureColumn` 增量迁移,读时默认 null);`register` 接受该可选字段。
+- 「在终端中打开」由模糊的 `claude --continue` 升级为精确的 `claude --resume <id>`(有 id 时);
+  codex 用 `codex resume <id>`。资料页 / 会话信息页展示 `会话 ID`。
+- 定位:原生 session id 是**属性**(精确恢复 + 展示),不是身份主键 —— 主键仍是 Beacon 自铸 id。
+
 ## [0.6.2] - 2026-06-20
 
 ### 新增 —— 可见范围 + 智能体主动申请联系(授权双向化)

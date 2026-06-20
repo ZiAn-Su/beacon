@@ -105,6 +105,22 @@ export function SessionInfo({ session, now }: Props) {
           </span>
         </Row>
 
+        {/* Native session id — the runtime's own conversation id, when reported */}
+        {session.nativeSessionId && (
+          <>
+            <SectionHeader>{t("info.sessionId")}</SectionHeader>
+            <Row>
+              <code
+                className="break-all text-[11.5px]"
+                style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}
+                title={session.nativeSessionId}
+              >
+                {session.nativeSessionId}
+              </code>
+            </Row>
+          </>
+        )}
+
         {/* Trust tier — controls agent-to-agent messaging authorization */}
         <SectionHeader>{t("info.trust")}</SectionHeader>
         <Row icon={<ShieldCheck size={12} style={{ color: "var(--text-muted)" }} />}>
@@ -242,17 +258,27 @@ function KeyValue({
   );
 }
 
-function resumeCommand(session: { runtime: string; workPath: string }): string {
+function resumeCommand(session: {
+  runtime: string;
+  workPath: string;
+  nativeSessionId?: string | null;
+}): string {
+  const sid = session.nativeSessionId;
   if (session.runtime === "claude-code" || session.runtime === "claude") {
-    return `cd "${session.workPath}" && claude --continue`;
+    // Precise resume when we know the native id; fall back to most-recent.
+    return `cd "${session.workPath}" && claude ${sid ? `--resume ${sid}` : "--continue"}`;
   }
   if (session.runtime === "codex") {
-    return `cd "${session.workPath}" && codex`;
+    return `cd "${session.workPath}" && codex${sid ? ` resume ${sid}` : ""}`;
   }
   return `cd "${session.workPath}"`;
 }
 
-function OpenSessionRow({ session }: { session: { runtime: string; workPath: string } }) {
+function OpenSessionRow({
+  session,
+}: {
+  session: { runtime: string; workPath: string; nativeSessionId?: string | null };
+}) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const cmd = resumeCommand(session);

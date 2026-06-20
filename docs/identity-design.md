@@ -59,6 +59,11 @@ Principal
 
 `runtime` / `workPath` 是 agent 的**天然属性**(用于自动命名、检索、人工匹配),但**不是身份主键**。
 
+**原生 session id 同理 —— 是属性,不是主键。** 运行时若暴露自己的会话 id(Claude Code 经
+`CLAUDE_CODE_SESSION_ID` 注入子进程,已实测;codex 等同理),agent 在 register 时一并上报,存为
+`nativeSessionId`。它的用途是**精确恢复**(`claude --resume <id>` 而非模糊的 `--continue`)和资料页展示;
+身份主键仍是 Beacon 自铸的 `contact.id`(运行时中立,适配无 session 概念的运行时)。续接仍由 bindKey 断言。
+
 ---
 
 ## 四、监护关系(Guardianship)

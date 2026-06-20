@@ -14,7 +14,12 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 export interface AgentOps {
-  register(input: { runtime?: string; workPath?: string; task?: string }): Promise<{ id: string }>;
+  register(input: {
+    runtime?: string;
+    workPath?: string;
+    task?: string;
+    nativeSessionId?: string | null;
+  }): Promise<{ id: string }>;
   notify(id: string, text: string): Promise<void>;
   ask(id: string, question: string, options?: string[] | null): Promise<{ askId: string }>;
   waitAsk(askId: string, timeoutMs: number): Promise<{ status: string; answer: string | null }>;
@@ -51,6 +56,9 @@ export interface AgentDefaults {
   runtime: string;
   workPath: string;
   task: string;
+  // The runtime's own session id (e.g. from CLAUDE_CODE_SESSION_ID), reported at
+  // register so the human can precisely resume this exact conversation.
+  nativeSessionId?: string | null;
 }
 
 // Guidance returned when a peer message is blocked pending guardian approval.
@@ -84,6 +92,7 @@ export function registerBeaconTools(
       runtime: defaults.runtime,
       workPath: defaults.workPath,
       task: task ?? defaults.task,
+      nativeSessionId: defaults.nativeSessionId ?? null,
     });
     sessionId = id;
     return id;
@@ -109,6 +118,7 @@ export function registerBeaconTools(
         runtime: runtime ?? defaults.runtime,
         workPath: work_path ?? defaults.workPath,
         task,
+        nativeSessionId: defaults.nativeSessionId ?? null,
       });
       sessionId = id;
       return {
@@ -415,6 +425,7 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
           runtime: input.runtime,
           workPath: input.workPath,
           task: input.task,
+          nativeSessionId: input.nativeSessionId ?? null,
         }),
       });
       return { id: session.id };

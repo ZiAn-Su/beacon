@@ -22,12 +22,21 @@ const PLATFORM_TOKEN = process.env.PLATFORM_TOKEN ?? '';
 const RUNTIME = process.env.AGENT_RUNTIME ?? 'claude-code';
 const WORK_PATH = process.env.AGENT_WORK_PATH ?? process.cwd();
 const DEFAULT_TASK = process.env.AGENT_TASK ?? '';
+// The runtime's own session id, when it exposes one to child processes.
+// Claude Code sets CLAUDE_CODE_SESSION_ID; AGENT_SESSION_ID is an explicit
+// override for any runtime; CODEX_SESSION_ID covers codex when present.
+const NATIVE_SESSION_ID =
+  process.env.AGENT_SESSION_ID ??
+  process.env.CLAUDE_CODE_SESSION_ID ??
+  process.env.CODEX_SESSION_ID ??
+  null;
 
 const server = new McpServer({ name: 'beacon', version: '0.4.0' });
 registerBeaconTools(server, httpOps(PLATFORM_URL, PLATFORM_TOKEN), {
   runtime: RUNTIME,
   workPath: WORK_PATH,
   task: DEFAULT_TASK,
+  nativeSessionId: NATIVE_SESSION_ID,
 });
 
 const transport = new StdioServerTransport();

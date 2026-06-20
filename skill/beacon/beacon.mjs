@@ -26,6 +26,13 @@ const BASE = (process.env.PLATFORM_URL ?? 'http://127.0.0.1:4319').replace(/\/$/
 const TOKEN = process.env.PLATFORM_TOKEN ?? '';
 const RUNTIME = process.env.AGENT_RUNTIME ?? 'claude-code';
 const WORK = process.env.AGENT_WORK_PATH ?? process.cwd();
+// The runtime's own session id, when it exposes one (Claude Code sets
+// CLAUDE_CODE_SESSION_ID). Lets the human precisely resume this conversation.
+const NATIVE_SESSION_ID =
+  process.env.AGENT_SESSION_ID ??
+  process.env.CLAUDE_CODE_SESSION_ID ??
+  process.env.CODEX_SESSION_ID ??
+  null;
 // When the platform relaunches an offline agent, it injects this so the skill
 // attaches to the original conversation instead of registering a new one.
 const INJECTED_SESSION = process.env.BEACON_SESSION_ID ?? '';
@@ -69,6 +76,7 @@ async function register(task) {
     runtime: RUNTIME,
     workPath: WORK,
     task: task || process.env.AGENT_TASK || '',
+    nativeSessionId: NATIVE_SESSION_ID,
   });
   saveCache({ sessionId: session.id, lastInboxTs: 0 });
   return session.id;

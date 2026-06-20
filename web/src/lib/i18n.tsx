@@ -144,6 +144,7 @@ const en: Dict = {
   "profile.origin": "Origin",
   "profile.originHuman": "Created by a human",
   "profile.originAgent": "Self-registered agent",
+  "profile.sessionId": "Session ID",
   "profile.trust": "Trust",
   "profile.trustHint": "Default rule for messaging other agents.",
   "profile.contacts": "Its contacts",
@@ -193,6 +194,7 @@ const en: Dict = {
 
   "info.status": "Status",
   "info.runtime": "Runtime",
+  "info.sessionId": "Session ID",
   "info.workdir": "Working directory",
   "info.timeline": "Timeline",
   "info.started": "Started",
@@ -366,6 +368,7 @@ const zh: Dict = {
   "profile.origin": "来源",
   "profile.originHuman": "由人创建",
   "profile.originAgent": "自行注册的智能体",
+  "profile.sessionId": "会话 ID",
   "profile.trust": "信任档位",
   "profile.trustHint": "给其他智能体发消息的默认规则。",
   "profile.contacts": "它的联系人",
@@ -415,6 +418,7 @@ const zh: Dict = {
 
   "info.status": "状态",
   "info.runtime": "运行时",
+  "info.sessionId": "会话 ID",
   "info.workdir": "工作路径",
   "info.timeline": "时间线",
   "info.started": "开始",

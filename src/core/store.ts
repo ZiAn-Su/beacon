@@ -108,6 +108,7 @@ ensureColumn('sessions', 'bindKey', 'TEXT');
 ensureColumn('sessions', 'origin', 'TEXT');
 ensureColumn('sessions', 'guardianId', 'TEXT');
 ensureColumn('sessions', 'trustTier', 'TEXT');
+ensureColumn('sessions', 'nativeSessionId', 'TEXT');
 // Identity Phase 3 — agent->agent peer messages. NULL on pre-existing rows and
 // on human/agent messages; only set for kind 'peer'. Defaulted at read time.
 ensureColumn('messages', 'fromSessionId', 'TEXT');
@@ -157,6 +158,7 @@ interface SessionRow {
   archivedAt: number | null;
   lastSeenAt: number | null;
   bindKey: string | null;
+  nativeSessionId: string | null;
   origin: string | null;
   guardianId: string | null;
   trustTier: string | null;
@@ -198,6 +200,7 @@ function mapSession(r: SessionRow): Session {
     archivedAt: r.archivedAt ?? null,
     lastSeenAt: r.lastSeenAt ?? null,
     bindKey: r.bindKey ?? null,
+    nativeSessionId: r.nativeSessionId ?? null,
     origin: r.origin === 'human' ? 'human' : 'agent',
     guardianId: r.guardianId ?? null,
     trustTier: (r.trustTier ?? 'standard') as TrustTier,
@@ -235,8 +238,8 @@ function mapAsk(r: AskRow): Ask {
 
 // ---------- sessions ----------
 const insertSession = db.prepare(
-  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, lastSeenAt, bindKey, origin, guardianId, trustTier, createdAt, updatedAt)
-   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @lastSeenAt, @bindKey, @origin, @guardianId, @trustTier, @createdAt, @updatedAt)`
+  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, lastSeenAt, bindKey, nativeSessionId, origin, guardianId, trustTier, createdAt, updatedAt)
+   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @lastSeenAt, @bindKey, @nativeSessionId, @origin, @guardianId, @trustTier, @createdAt, @updatedAt)`
 );
 const selectSession = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
 const selectSessions = db.prepare(`SELECT * FROM sessions ORDER BY updatedAt DESC`);
@@ -261,6 +264,7 @@ export function createSession(input: {
   workPath: string;
   task: string;
   bindKey?: string | null;
+  nativeSessionId?: string | null;
   origin?: 'agent' | 'human';
   name?: string | null;
 }): Session {
@@ -276,6 +280,7 @@ export function createSession(input: {
     archivedAt: null,
     lastSeenAt: ts,
     bindKey: input.bindKey ?? null,
+    nativeSessionId: input.nativeSessionId ?? null,
     origin: input.origin === 'human' ? 'human' : 'agent',
     guardianId: getOwner().id,
     trustTier: 'standard',
@@ -306,6 +311,7 @@ export function registerOrClaim(input: {
   workPath: string;
   task: string;
   bindKey?: string | null;
+  nativeSessionId?: string | null;
   origin?: 'agent' | 'human';
   name?: string | null;
 }): Session {

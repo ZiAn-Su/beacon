@@ -333,6 +333,17 @@ function ContactProfile({
               {session.origin === "human" ? t("profile.originHuman") : t("profile.originAgent")}
             </span>
           </Field>
+          {session.nativeSessionId && (
+            <Field label={t("profile.sessionId")}>
+              <code
+                className="break-all text-[12px]"
+                style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}
+                title={session.nativeSessionId}
+              >
+                {session.nativeSessionId}
+              </code>
+            </Field>
+          )}
 
           {/* Trust tier */}
           <Field label={t("profile.trust")}>

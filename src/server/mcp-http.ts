@@ -24,6 +24,7 @@ function storeOps(): AgentOps {
         runtime: input.runtime || 'claude-code',
         workPath: input.workPath || '',
         task: input.task || '',
+        nativeSessionId: input.nativeSessionId ?? null,
       });
       return { id: s.id };
     },
