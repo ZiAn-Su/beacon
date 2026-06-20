@@ -33,6 +33,14 @@ export function SettingsModal({ open, onClose }: Props) {
     { id: "off", label: t("settings.off"), desc: t("settings.offDesc") },
   ];
 
+  const agentComm = settings?.agentComm ?? "open";
+  const chooseComm = (v: NonNullable<AppSettings["agentComm"]>) =>
+    void updateSettings({ agentComm: v });
+  const commOptions: { id: NonNullable<AppSettings["agentComm"]>; label: string; desc: string }[] = [
+    { id: "open", label: t("settings.agentCommOpen"), desc: t("settings.agentCommOpenDesc") },
+    { id: "off", label: t("settings.agentCommOff"), desc: t("settings.agentCommOffDesc") },
+  ];
+
   return (
     <div
       role="dialog"
@@ -86,6 +94,52 @@ export function SettingsModal({ open, onClose }: Props) {
                 <button
                   key={o.id}
                   onClick={() => choose(o.id)}
+                  className="flex items-start gap-3 rounded-xl px-3.5 py-3 text-left transition-colors"
+                  style={{
+                    background: active ? "var(--accent-soft)" : "var(--surface-card)",
+                    border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                  }}
+                >
+                  <span
+                    className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+                    style={{ border: `1.5px solid ${active ? "var(--accent)" : "var(--border-strong)"}` }}
+                  >
+                    {active && (
+                      <span
+                        className="h-2 w-2 rounded-full"
+                        style={{ background: "var(--accent)" }}
+                      />
+                    )}
+                  </span>
+                  <span className="min-w-0">
+                    <span
+                      className="block text-[13.5px] font-medium"
+                      style={{ color: active ? "var(--accent)" : "var(--text)" }}
+                    >
+                      {o.label}
+                    </span>
+                    <span className="mt-0.5 block text-[12px]" style={{ color: "var(--text-muted)" }}>
+                      {o.desc}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            className="mb-2.5 mt-6 text-[10.5px] font-semibold uppercase tracking-wider"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {t("settings.agentCommHeading")}
+          </div>
+          <div className="flex flex-col gap-2">
+            {commOptions.map((o) => {
+              const active = agentComm === o.id;
+              return (
+                <button
+                  key={o.id}
+                  onClick={() => chooseComm(o.id)}
                   className="flex items-start gap-3 rounded-xl px-3.5 py-3 text-left transition-colors"
                   style={{
                     background: active ? "var(--accent-soft)" : "var(--surface-card)",

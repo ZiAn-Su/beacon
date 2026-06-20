@@ -48,6 +48,7 @@ interface StoreState {
   cancelAsk: (askId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string | null) => Promise<void>;
   setArchived: (sessionId: string, archived: boolean) => Promise<void>;
+  setSessionTrustTier: (sessionId: string, trustTier: string) => Promise<void>;
   startAgent: (sessionId: string, text: string) => Promise<string>;
   settings: AppSettings | null;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
@@ -329,6 +330,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [upsertSession],
   );
 
+  const setSessionTrustTier = useCallback(
+    async (sessionId: string, trustTier: string) => {
+      const session = await patchSession(sessionId, { trustTier });
+      upsertSession(session);
+    },
+    [upsertSession],
+  );
+
   const value = useMemo<StoreState>(
     () => ({
       sessions,
@@ -348,6 +357,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       cancelAsk,
       renameSession,
       setArchived,
+      setSessionTrustTier,
       startAgent,
       settings,
       updateSettings,
@@ -369,6 +379,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       send,
       renameSession,
       setArchived,
+      setSessionTrustTier,
       startAgent,
       settings,
       updateSettings,

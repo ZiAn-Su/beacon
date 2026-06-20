@@ -7,6 +7,8 @@ export type SessionStatus =
   | "idle"
   | "done";
 
+export type TrustTier = "restricted" | "standard" | "trusted" | "autonomous";
+
 export interface Session {
   id: string;
   runtime: string;
@@ -16,6 +18,9 @@ export interface Session {
   title: string | null;
   archivedAt: number | null;
   lastSeenAt: number | null;
+  // Authorization graduation for this agent's outbound peer messaging.
+  // Optional for forward-compat with older payloads; defaults to "standard".
+  trustTier?: TrustTier;
   createdAt: number;
   updatedAt: number;
 }

@@ -65,6 +65,8 @@ export async function startAgent(sessionId: string, text: string): Promise<strin
 export interface AppSettings {
   autoStart: "ask" | "auto" | "off";
   startPermission: string;
+  // Global master switch for agent-to-agent messaging.
+  agentComm?: "open" | "off";
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -91,7 +93,7 @@ export async function cancelAsk(askId: string): Promise<void> {
 /** Rename and/or archive a conversation (PATCH /api/sessions/:id). */
 export async function patchSession(
   sessionId: string,
-  body: { title?: string | null; archived?: boolean },
+  body: { title?: string | null; archived?: boolean; trustTier?: string },
 ): Promise<Session> {
   const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
     method: "PATCH",

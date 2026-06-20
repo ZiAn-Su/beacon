@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { Check, Copy, Folder, History, Info, Play, Terminal } from "lucide-react";
-import type { Session } from "../types";
+import { Check, Copy, Folder, History, Info, Play, ShieldCheck, Terminal } from "lucide-react";
+import type { Session, TrustTier } from "../types";
 import { Avatar } from "./Avatar";
 import { pathBase, sessionName, absoluteTime, classNames, isOnline } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import { useStore } from "../lib/store";
+
+const TRUST_TIERS: TrustTier[] = ["restricted", "standard", "trusted", "autonomous"];
 
 interface Props {
   session: Session;
@@ -23,6 +26,7 @@ const STATUS_COLOR: Record<StatusKey, string> = {
 
 export function SessionInfo({ session, now }: Props) {
   const { t, rel } = useI18n();
+  const { setSessionTrustTier } = useStore();
   const baseName = pathBase(session.workPath) || session.runtime;
   const task = sessionName(session, t("conv.titleFallback", { name: baseName }));
   const statusKey: StatusKey = session.status;
@@ -98,6 +102,36 @@ export function SessionInfo({ session, now }: Props) {
             }}
           >
             {session.runtime}
+          </span>
+        </Row>
+
+        {/* Trust tier — controls agent-to-agent messaging authorization */}
+        <SectionHeader>{t("info.trust")}</SectionHeader>
+        <Row icon={<ShieldCheck size={12} style={{ color: "var(--text-muted)" }} />}>
+          <span className="flex min-w-0 flex-col gap-1.5">
+            <span className="flex flex-wrap gap-1.5">
+              {TRUST_TIERS.map((tier) => {
+                const active = (session.trustTier ?? "standard") === tier;
+                return (
+                  <button
+                    key={tier}
+                    onClick={() => void setSessionTrustTier(session.id, tier)}
+                    title={t(`trust.${tier}Desc`)}
+                    className="rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors"
+                    style={{
+                      color: active ? "#fff" : "var(--text-secondary)",
+                      background: active ? "var(--accent)" : "var(--surface-card)",
+                      border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                    }}
+                  >
+                    {t(`trust.${tier}`)}
+                  </button>
+                );
+              })}
+            </span>
+            <span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+              {t("info.trustHint")}
+            </span>
           </span>
         </Row>
 
