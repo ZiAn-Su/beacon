@@ -15,16 +15,25 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import * as store from '../core/store';
 import { registerBeaconTools, type AgentOps } from '../mcp/tools';
+import { resolveActiveSessionId } from './agent-sessions';
 
 // Direct, in-process ops backed by the core store (no HTTP round-trip).
 function storeOps(): AgentOps {
   return {
     async register(input) {
-      const s = store.createSession({
-        runtime: input.runtime || 'claude-code',
-        workPath: input.workPath || '',
+      const runtime = input.runtime || 'claude-code';
+      const workPath = input.workPath || '';
+      // Same claim chain as the REST path: attach to an existing contact (native
+      // id / pending launch) before creating a new one, so a launched agent on
+      // the hosted transport doesn't open a duplicate.
+      const resolved =
+        resolveActiveSessionId(workPath, runtime) ?? input.nativeSessionId ?? null;
+      const s = store.registerOrClaim({
+        runtime,
+        workPath,
         task: input.task || '',
         nativeSessionId: input.nativeSessionId ?? null,
+        resolvedNativeId: resolved,
         name: input.name ?? null,
         description: input.description ?? null,
       });

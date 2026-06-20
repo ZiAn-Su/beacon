@@ -256,6 +256,9 @@ const updateSessionStatus = db.prepare(
 const updateSessionTitle = db.prepare(
   `UPDATE sessions SET title = @title WHERE id = @id`
 );
+const updateSessionTask = db.prepare(
+  `UPDATE sessions SET task = @task WHERE id = @id`
+);
 const updateSessionArchived = db.prepare(
   `UPDATE sessions SET archivedAt = @archivedAt WHERE id = @id`
 );
@@ -338,10 +341,66 @@ export function listSessions(): Session[] {
   return (selectSessions.all() as SessionRow[]).map(mapSession);
 }
 
+// Sessions the human created via "launch" (and the platform spawned) but whose
+// agent process hasn't attached yet. Keyed by normalized work path, with a TTL,
+// so the FIRST registration arriving from that folder attaches to the waiting
+// contact instead of opening a duplicate — regardless of transport (skill /
+// stdio MCP attach via injected BEACON_SESSION_ID; hosted HTTP MCP attaches via
+// this work-path claim, as long as it reports its work_path).
+const pendingLaunch = new Map<string, { sessionId: string; ts: number }>();
+const LAUNCH_CLAIM_TTL_MS = 10 * 60_000;
+
+/** Mark a freshly-launched session as awaiting its agent's first registration. */
+export function markPendingLaunch(sessionId: string): void {
+  const s = getSession(sessionId);
+  if (!s || !s.workPath) return;
+  pendingLaunch.set(normWorkPath(s.workPath), { sessionId, ts: now() });
+}
+
+function takePendingLaunch(workPath: string): string | null {
+  const key = normWorkPath(workPath);
+  if (!key) return null;
+  const pend = pendingLaunch.get(key);
+  if (!pend) return null;
+  pendingLaunch.delete(key);
+  if (now() - pend.ts > LAUNCH_CLAIM_TTL_MS) return null;
+  return pend.sessionId;
+}
+
+// Attach a registering agent to an EXISTING contact: bump presence, mark working,
+// and refresh the card from anything the agent reported on (re)connect.
+function continueSession(
+  id: string,
+  input: { task?: string; name?: string | null; description?: string | null },
+  native: string | null,
+): Session {
+  const ts = now();
+  updateSeen.run({ id, lastSeenAt: ts });
+  updateSessionStatus.run({ id, status: 'working', updatedAt: ts });
+  if (input.name != null && input.name.trim()) {
+    updateSessionTitle.run({ id, title: input.name.trim() });
+  }
+  if (input.description != null && input.description.trim()) {
+    updateSessionDescription.run({ id, description: input.description.trim() });
+  }
+  if (input.task != null && input.task.trim()) {
+    updateSessionTask.run({ id, task: input.task.trim() });
+  }
+  if (native) updateNativeSessionId.run({ id, nativeSessionId: native });
+  const continued = getSession(id)!;
+  bus.emit('session', continued);
+  return continued;
+}
+
 /**
- * The register "find-or-create": when a bindKey is supplied and matches an
- * existing session, continue it (re-mark working, bump presence) and return the
- * same id; otherwise create a fresh session.
+ * The register "find-or-attach-or-create". Tries, in order:
+ *   1. bindKey continuation (an agent resuming the exact context it asserted),
+ *   2. native-session-id match (the same runtime conversation is already a
+ *      contact — e.g. an imported session being resumed),
+ *   3. a pending launched session in the same work dir,
+ *   4. otherwise a fresh session.
+ * `resolvedNativeId` is the platform-resolved on-disk id (preferred over any
+ * self-reported one) and is used both to match (2) and to stamp the result.
  */
 export function registerOrClaim(input: {
   runtime: string;
@@ -349,30 +408,30 @@ export function registerOrClaim(input: {
   task: string;
   bindKey?: string | null;
   nativeSessionId?: string | null;
+  resolvedNativeId?: string | null;
   origin?: 'agent' | 'human';
   name?: string | null;
   description?: string | null;
 }): Session {
+  const native = input.resolvedNativeId ?? input.nativeSessionId ?? null;
+
+  // 1. bindKey continuation
   const key = input.bindKey && input.bindKey.trim() ? input.bindKey : null;
   if (key) {
     const existing = selectSessionByBindKey.get(key) as SessionRow | undefined;
-    if (existing) {
-      const ts = now();
-      updateSeen.run({ id: existing.id, lastSeenAt: ts });
-      updateSessionStatus.run({ id: existing.id, status: 'working', updatedAt: ts });
-      // Refresh the card if the agent supplied a new name / intro on resume.
-      if (input.name != null && input.name.trim()) {
-        updateSessionTitle.run({ id: existing.id, title: input.name.trim() });
-      }
-      if (input.description != null && input.description.trim()) {
-        updateSessionDescription.run({ id: existing.id, description: input.description.trim() });
-      }
-      const continued = getSession(existing.id)!;
-      bus.emit('session', continued);
-      return continued;
-    }
+    if (existing) return continueSession(existing.id, input, native);
   }
-  return createSession(input);
+  // 2. same runtime conversation already tracked as a contact
+  if (native) {
+    const ex = getSessionByNativeId(native);
+    if (ex) return continueSession(ex.id, input, native);
+  }
+  // 3. a launched session waiting for its agent in this work dir
+  const pendId = takePendingLaunch(input.workPath);
+  if (pendId && getSession(pendId)) return continueSession(pendId, input, native);
+
+  // 4. brand new
+  return createSession({ ...input, nativeSessionId: native });
 }
 
 export function setStatus(id: string, status: string): Session | undefined {

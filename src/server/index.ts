@@ -89,24 +89,25 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
   }
   // Identity Phase 1: optional bindKey (continuation), name (display title) and
   // origin ('agent'|'human'; anything else falls back to 'agent').
-  let session = store.registerOrClaim({
+  // The native session id is objective on-disk truth, so the PLATFORM resolves it
+  // from the runtime's transcripts (by work path) rather than trusting the agent.
+  // The self-reported value is only a fallback for agents whose disk the platform
+  // can't see (e.g. a remote agent reaching a hosted platform). Passed into
+  // registerOrClaim so it can both MATCH an existing contact and stamp the result.
+  const resolved =
+    resolveActiveSessionId(String(workPath ?? ''), String(runtime)) ??
+    (nativeSessionId != null ? String(nativeSessionId) : null);
+  const session = store.registerOrClaim({
     runtime: String(runtime),
     workPath: String(workPath ?? ''),
     task: String(task),
     bindKey: bindKey != null ? String(bindKey) : null,
     nativeSessionId: nativeSessionId != null ? String(nativeSessionId) : null,
+    resolvedNativeId: resolved,
     origin: origin === 'human' ? 'human' : 'agent',
     name: name != null ? String(name) : null,
     description: description != null ? String(description) : null,
   });
-  // The native session id is objective on-disk truth, so the PLATFORM resolves it
-  // from the runtime's transcripts (by work path) rather than trusting the agent.
-  // The self-reported value is only a fallback for agents whose disk the platform
-  // can't see (e.g. a remote agent reaching a hosted platform).
-  const resolved =
-    resolveActiveSessionId(session.workPath, session.runtime) ??
-    (nativeSessionId != null ? String(nativeSessionId) : null);
-  if (resolved) session = store.setNativeSessionId(session.id, resolved) ?? session;
   ok(res, { session, agentId: session.id });
 });
 
@@ -353,6 +354,9 @@ app.post('/api/sessions/launch', (req: Request, res: Response) => {
   const task = body.task != null ? String(body.task) : '';
   if (!workPath.trim()) { res.status(400).json({ error: 'workPath is required' }); return; }
   const session = store.createSession({ runtime, workPath, task, name, origin: 'human' });
+  // Let the agent's first registration (any transport) attach to THIS contact
+  // instead of opening a duplicate.
+  store.markPendingLaunch(session.id);
   // Start a fresh agent process (not a resume) in the folder.
   markFreshLaunch(session.id);
   const launched = ensurePty(session.id);

@@ -133,6 +133,17 @@ export function registerBeaconTools(
       },
     },
     async ({ task, work_path, runtime, name, about }) => {
+      // Already bound (the platform injected BEACON_SESSION_ID when it launched /
+      // woke us, or we registered earlier): attach to that conversation and just
+      // refresh the card, rather than opening a duplicate contact.
+      if (sessionId) {
+        if ((name != null && name !== '') || (about != null && about !== '')) {
+          try { await ops.updateProfile(sessionId, { name, about }); } catch { /* best effort */ }
+        }
+        return {
+          content: [{ type: 'text', text: `Attached to existing session ${sessionId}.` }],
+        };
+      }
       const { id } = await ops.register({
         runtime: runtime ?? defaults.runtime,
         workPath: work_path ?? defaults.workPath,

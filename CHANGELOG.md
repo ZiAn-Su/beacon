@@ -3,6 +3,24 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.8] - 2026-06-21
+
+### 修复 —— 拉起/导入的智能体可靠附到联系人,不再开重复(全传输)
+
+补上 0.6.7 标注的缺口:之前只有 skill / stdio MCP(读注入的 `BEACON_SESSION_ID`)能附到预建卡,
+托管 HTTP MCP 的 agent 会另开一个重复联系人。把"认领"逻辑统一收口到 `registerOrClaim`,两条 register
+路径(REST 与托管 MCP)都走它,按序认领:
+
+1. **bindKey** 续接(原有);
+2. **原生会话 id** 命中:同一段运行时对话已是联系人(如导入后被 resume)→ 附到它;
+3. **待认领的拉起会话**:`launch` 时 `markPendingLaunch(workPath)`,该目录下第一个 register 附上去
+   (TTL 10 分钟);
+4. 都不命中才新建。
+
+外加:stdio MCP 的 `register_session` 在平台注入了 `BEACON_SESSION_ID` 时直接附到该会话(顺带修了 wake
+场景下显式 register 会重复建卡的潜伏 bug)。实测:launch 后同目录 register 附到同一 id;导入 nat-1 后
+上报 nat-1 的 register 附到导入卡;无命中则新建;bindKey 续接不受影响;全程不产生重复联系人。
+
 ## [0.6.7] - 2026-06-21
 
 ### 新增 —— 在 UI 里添加智能体(发现已有 / 新建拉起)
