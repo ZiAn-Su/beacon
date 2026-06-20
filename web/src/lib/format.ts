@@ -69,6 +69,18 @@ export function pathBase(p: string): string {
   return parts[parts.length - 1] ?? p;
 }
 
+// Mirrors the backend's store.isVisibleScope: two agents share a working
+// directory when their paths are identical or one is nested under the other.
+export function isVisibleScope(aPath: string, bPath: string): boolean {
+  const norm = (p: string) =>
+    (p || "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  const a = norm(aPath);
+  const b = norm(bPath);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return a.startsWith(b + "/") || b.startsWith(a + "/");
+}
+
 export function pathDir(p: string): string {
   if (!p) return "";
   const norm = p.replace(/\\/g, "/");

@@ -65,6 +65,23 @@ export async function deleteGrant(id: string): Promise<void> {
   await json<{ ok: boolean }>(r);
 }
 
+// An agent-initiated request to contact another agent, pending guardian decision.
+export interface ContactRequest {
+  id: string;
+  fromId: string;
+  toId: string;
+  askId: string;
+  reason: string | null;
+  status: "pending" | "approved" | "denied";
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+export async function listContactRequests(): Promise<ContactRequest[]> {
+  const r = await fetch("/api/contact-requests");
+  return (await json<{ requests: ContactRequest[] }>(r)).requests;
+}
+
 export interface Conversation {
   session: Session;
   messages: Message[];

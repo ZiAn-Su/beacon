@@ -1,23 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  BookUser,
-  MessageSquare,
-  Plus,
-  Search,
-  ShieldCheck,
-  ShieldX,
-  Trash2,
-  User,
-} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { BookUser, MessageSquare, Search, Trash2, User } from "lucide-react";
 import type { Session, TrustTier } from "../types";
 import {
   createGrant,
   deleteGrant,
+  listContactRequests,
   listGrants,
+  type ContactRequest,
   type Grant,
 } from "../lib/api";
 import { Avatar } from "./Avatar";
-import { isOnline, pathBase, sessionName } from "../lib/format";
+import { isOnline, isVisibleScope, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useStore } from "../lib/store";
 
@@ -257,40 +250,45 @@ function ContactProfile({
   const tier = session.trustTier ?? "standard";
 
   const [grants, setGrants] = useState<Grant[]>([]);
-  const [targetId, setTargetId] = useState("");
+  const [requests, setRequests] = useState<ContactRequest[]>([]);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    let alive = true;
-    listGrants().then((g) => alive && setGrants(g)).catch(() => {});
-    return () => { alive = false; };
-  }, [session.id]);
-
-  // Outgoing rules from this contact: who it may / may not message.
-  const outgoing = grants.filter((g) => g.fromId === session.id);
-  const nameOf = (id: string) => {
-    const s = sessions.find((a) => a.id === id);
-    return s ? sessionName(s, pathBase(s.workPath) || s.runtime) : id.slice(0, 8);
-  };
-  const candidates = sessions.filter(
-    (s) => s.id !== session.id && !outgoing.some((g) => g.toId === s.id),
-  );
-
-  const addGrant = async (effect: "allow" | "deny") => {
-    if (!targetId) return;
-    setBusy(true);
+  const refresh = useCallback(async () => {
     try {
-      await createGrant(session.id, targetId, effect);
-      setGrants(await listGrants());
-      setTargetId("");
-    } catch { /* ignore */ } finally { setBusy(false); }
-  };
-  const removeGrant = async (id: string) => {
+      const [g, r] = await Promise.all([listGrants(), listContactRequests()]);
+      setGrants(g);
+      setRequests(r);
+    } catch { /* keep prior */ }
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh, session.id]);
+
+  // This contact's address book: every agent it can reach or could request —
+  // i.e. in its visible scope (same working directory) or already wired by a
+  // grant/pending request. Each carries a status the guardian can act on.
+  type PeerStatus = "allow" | "deny" | "pending" | "open";
+  const book: { peer: Session; status: PeerStatus; grantId?: string }[] = [];
+  for (const peer of sessions) {
+    if (peer.id === session.id) continue;
+    const g = grants.find((x) => x.fromId === session.id && x.toId === peer.id);
+    const pending = requests.some(
+      (r) => r.fromId === session.id && r.toId === peer.id && r.status === "pending",
+    );
+    if (g) book.push({ peer, status: g.effect, grantId: g.id });
+    else if (pending) book.push({ peer, status: "pending" });
+    else if (isVisibleScope(session.workPath, peer.workPath)) book.push({ peer, status: "open" });
+    // else: outside visible scope and no link -> not in the address book
+  }
+  book.sort((a, b) => sessionName(a.peer, "").localeCompare(sessionName(b.peer, "")));
+
+  const setEdge = async (toId: string, effect: "allow" | "deny") => {
     setBusy(true);
-    try {
-      await deleteGrant(id);
-      setGrants((g) => g.filter((x) => x.id !== id));
-    } catch { /* ignore */ } finally { setBusy(false); }
+    try { await createGrant(session.id, toId, effect); await refresh(); }
+    catch { /* ignore */ } finally { setBusy(false); }
+  };
+  const clearEdge = async (grantId: string) => {
+    setBusy(true);
+    try { await deleteGrant(grantId); await refresh(); }
+    catch { /* ignore */ } finally { setBusy(false); }
   };
 
   return (
@@ -365,81 +363,66 @@ function ContactProfile({
             </div>
           </Field>
 
-          {/* Per-contact authorization (its peers) */}
-          <Field label={t("profile.auth")} top>
+          {/* Its address book: who it can reach / request, with status + actions. */}
+          <Field label={t("profile.contacts")} top>
             <div className="flex min-w-0 flex-col gap-2">
-              {outgoing.length > 0 ? (
+              {book.length === 0 ? (
+                <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+                  {t("profile.noContacts")}
+                </span>
+              ) : (
                 <ul className="flex flex-col gap-1.5">
-                  {outgoing.map((g) => (
+                  {book.map(({ peer, status, grantId }) => (
                     <li
-                      key={g.id}
+                      key={peer.id}
                       className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px]"
                       style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
                     >
-                      {g.effect === "allow" ? (
-                        <ShieldCheck size={13} style={{ color: "var(--green)" }} />
-                      ) : (
-                        <ShieldX size={13} style={{ color: "var(--danger)" }} />
-                      )}
+                      <Avatar id={peer.id} label={pathBase(peer.workPath) || peer.runtime} size={22} />
                       <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text)" }}>
-                        {nameOf(g.toId)}
+                        {sessionName(peer, pathBase(peer.workPath) || peer.runtime)}
                       </span>
-                      <span
-                        className="shrink-0 text-[11px] font-semibold"
-                        style={{ color: g.effect === "allow" ? "var(--green)" : "var(--danger)" }}
-                      >
-                        {g.effect === "allow" ? t("dir.allow") : t("dir.deny")}
-                      </span>
-                      <button
-                        disabled={busy}
-                        onClick={() => void removeGrant(g.id)}
-                        aria-label={t("dir.removeGrant")}
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded disabled:opacity-40"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
+                      <StatusPill status={status} />
+                      <div className="flex shrink-0 items-center gap-1">
+                        {status === "allow" || status === "deny" ? (
+                          <button
+                            disabled={busy}
+                            onClick={() => void clearEdge(grantId!)}
+                            aria-label={t("dir.removeGrant")}
+                            title={t("dir.removeGrant")}
+                            className="flex h-5 w-5 items-center justify-center rounded disabled:opacity-40"
+                            style={{ color: "var(--text-muted)" }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        ) : status === "open" ? (
+                          <>
+                            <button
+                              disabled={busy}
+                              onClick={() => void setEdge(peer.id, "allow")}
+                              className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-40"
+                              style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
+                            >
+                              {t("dir.allow")}
+                            </button>
+                            <button
+                              disabled={busy}
+                              onClick={() => void setEdge(peer.id, "deny")}
+                              className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-40"
+                              style={{ color: "var(--text-secondary)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+                            >
+                              {t("dir.deny")}
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-                  {t("profile.noRules")}
-                </span>
               )}
-
-              {/* Add a rule */}
-              <div className="flex items-center gap-2">
-                <select
-                  value={targetId}
-                  onChange={(e) => setTargetId(e.target.value)}
-                  className="min-w-0 flex-1 rounded-lg px-2.5 py-1.5 text-[12px]"
-                  style={{ background: "var(--surface-card)", color: targetId ? "var(--text)" : "var(--text-muted)", border: "1px solid var(--border)" }}
-                >
-                  <option value="">{t("profile.pickTarget")}</option>
-                  {candidates.map((c) => (
-                    <option key={c.id} value={c.id} style={{ color: "var(--text)" }}>
-                      {sessionName(c, pathBase(c.workPath) || c.runtime)}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  disabled={busy || !targetId}
-                  onClick={() => void addGrant("allow")}
-                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-[12px] font-semibold disabled:opacity-40"
-                  style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
-                >
-                  <Plus size={12} />{t("dir.allow")}
-                </button>
-                <button
-                  disabled={busy || !targetId}
-                  onClick={() => void addGrant("deny")}
-                  className="rounded-lg px-2.5 py-1.5 text-[12px] font-semibold disabled:opacity-40"
-                  style={{ color: "var(--text)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
-                >
-                  {t("dir.deny")}
-                </button>
-              </div>
+              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                {t("profile.contactsHint")}
+              </span>
             </div>
           </Field>
         </div>
@@ -457,6 +440,26 @@ function ContactProfile({
         </button>
       </div>
     </div>
+  );
+}
+
+function StatusPill({ status }: { status: "allow" | "deny" | "pending" | "open" }) {
+  const { t } = useI18n();
+  const map = {
+    allow: { label: t("profile.peerAllow"), color: "var(--green)" },
+    deny: { label: t("profile.peerDeny"), color: "var(--danger)" },
+    pending: { label: t("profile.peerPending"), color: "var(--amber)" },
+    open: { label: t("profile.peerOpen"), color: "var(--text-muted)" },
+  } as const;
+  const m = map[status];
+  return (
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium"
+      style={{ color: m.color, background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+    >
+      <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.color }} />
+      {m.label}
+    </span>
   );
 }
 
