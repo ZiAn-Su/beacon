@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookUser, Check, Copy, MessageSquare, Pencil, Plus, Search, Trash2, User, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookUser, Check, Copy, MessageSquare, Pencil, Plus, Search, Trash2, User, X } from "lucide-react";
 import type { Session, TrustTier } from "../types";
 import {
   createGrant,
@@ -253,7 +253,8 @@ function ContactProfile({
   sessions: Session[];
 }) {
   const { t } = useI18n();
-  const { setSessionTrustTier, renameSession, setSessionDescription } = useStore();
+  const { setSessionTrustTier, renameSession, setSessionDescription, setArchived, deleteSession } = useStore();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const label = pathBase(session.workPath) || session.runtime;
   const title = sessionName(session, label);
   const online = isOnline(session, Date.now());
@@ -274,7 +275,7 @@ function ContactProfile({
       setRequests(r);
     } catch { /* keep prior */ }
   }, []);
-  useEffect(() => { void refresh(); }, [refresh, session.id]);
+  useEffect(() => { void refresh(); setConfirmDelete(false); }, [refresh, session.id]);
 
   // This contact's address book: every agent it can reach or could request —
   // i.e. in its visible scope (same working directory) or already wired by a
@@ -465,6 +466,53 @@ function ContactProfile({
             )}
             <p className="mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
               {t("profile.contactsHint")}
+            </p>
+          </Section>
+
+          {/* Management: archive (reversible) and delete (permanent). */}
+          <Section title={t("profile.manage")}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => void setArchived(session.id, session.archivedAt == null)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors"
+                style={{ color: "var(--text)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
+              >
+                {session.archivedAt == null ? <Archive size={13} /> : <ArchiveRestore size={13} />}
+                {session.archivedAt == null ? t("profile.archive") : t("profile.unarchive")}
+              </button>
+
+              {confirmDelete ? (
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="text-[12px]" style={{ color: "var(--danger)" }}>{t("profile.deleteConfirm")}</span>
+                  <button
+                    onClick={() => void deleteSession(session.id)}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-semibold"
+                    style={{ color: "#fff", background: "var(--danger)", border: "1px solid var(--danger)" }}
+                  >
+                    <Trash2 size={13} />
+                    {t("profile.deleteYes")}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDelete(false)}
+                    className="rounded-lg px-3 py-1.5 text-[12.5px] font-medium"
+                    style={{ color: "var(--text-secondary)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
+                  >
+                    {t("profile.deleteCancel")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition-colors"
+                  style={{ color: "var(--danger)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
+                >
+                  <Trash2 size={13} />
+                  {t("profile.delete")}
+                </button>
+              )}
+            </div>
+            <p className="mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {t("profile.deleteHint")}
             </p>
           </Section>
         </div>

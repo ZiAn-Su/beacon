@@ -57,6 +57,19 @@ export function hasLivePty(sessionId: string): boolean {
   return live.has(sessionId);
 }
 
+/** Kill and forget a session's terminal (e.g. when the contact is deleted). */
+export function killPty(sessionId: string): void {
+  const entry = live.get(sessionId);
+  if (!entry) return;
+  try { entry.proc.kill(); } catch { /* already exited */ }
+  if (entry.idleTimer) clearTimeout(entry.idleTimer);
+  if (entry.heartbeat) clearInterval(entry.heartbeat);
+  for (const ws of entry.clients) {
+    try { ws.close(); } catch { /* ignore */ }
+  }
+  live.delete(sessionId);
+}
+
 /**
  * Ensure an interactive agent terminal exists for this session, spawning one on
  * demand if needed. Returns false only for runtimes we can't launch as an agent

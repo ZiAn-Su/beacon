@@ -58,4 +58,5 @@ export interface Message {
 export type WsEvent =
   | { type: "hello"; sessions: Session[] }
   | { type: "session"; session: Session }
+  | { type: "session-removed"; id: string }
   | { type: "message"; message: Message };

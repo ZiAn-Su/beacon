@@ -200,6 +200,14 @@ export async function cancelAsk(askId: string): Promise<void> {
   await json<{ ask: unknown }>(r);
 }
 
+/** Permanently delete a contact and everything attached to it. */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  });
+  await json<{ ok: boolean }>(r);
+}
+
 /** Rename and/or archive a conversation (PATCH /api/sessions/:id). */
 export async function patchSession(
   sessionId: string,

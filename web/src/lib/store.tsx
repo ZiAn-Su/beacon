@@ -11,6 +11,7 @@ import {
 import type { Message, Session, WsEvent } from "../types";
 import {
   cancelAsk,
+  deleteSession as deleteSessionApi,
   getConversation,
   getSettings,
   listSessions,
@@ -49,6 +50,7 @@ interface StoreState {
   renameSession: (sessionId: string, title: string | null) => Promise<void>;
   setSessionDescription: (sessionId: string, description: string | null) => Promise<void>;
   setArchived: (sessionId: string, archived: boolean) => Promise<void>;
+  deleteSession: (sessionId: string) => Promise<void>;
   setSessionTrustTier: (sessionId: string, trustTier: string) => Promise<void>;
   startAgent: (sessionId: string, text: string) => Promise<string>;
   settings: AppSettings | null;
@@ -167,6 +169,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           else next.push(e.session);
           return next;
         });
+        break;
+      }
+      case "session-removed": {
+        const goneId = e.id;
+        setSessions((prev) => prev.filter((s) => s.id !== goneId));
+        setMessagesBySession((prev) => {
+          if (!(goneId in prev)) return prev;
+          const next = { ...prev };
+          delete next[goneId];
+          return next;
+        });
+        setUnreadBySession((prev) => {
+          if (!prev[goneId]) return prev;
+          const next = { ...prev };
+          delete next[goneId];
+          return next;
+        });
+        loadedSessionsRef.current.delete(goneId);
+        if (selectedIdRef.current === goneId) setSelectedId(null);
         break;
       }
       case "message": {
@@ -347,6 +368,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [upsertSession],
   );
 
+  const deleteSession = useCallback(async (sessionId: string) => {
+    // Optimistic local removal; the WS 'session-removed' event reconciles too.
+    setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    if (selectedIdRef.current === sessionId) setSelectedId(null);
+    await deleteSessionApi(sessionId);
+  }, []);
+
   const value = useMemo<StoreState>(
     () => ({
       sessions,
@@ -368,6 +396,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionDescription,
       setArchived,
       setSessionTrustTier,
+      deleteSession,
       startAgent,
       settings,
       updateSettings,
@@ -391,6 +420,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setSessionDescription,
       setArchived,
       setSessionTrustTier,
+      deleteSession,
       startAgent,
       settings,
       updateSettings,

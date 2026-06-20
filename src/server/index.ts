@@ -16,7 +16,7 @@ import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { SESSION_STATUSES, TRUST_TIERS } from '../core/types';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty } from './pty';
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
 import { getSettings, setSettings } from '../core/settings';
@@ -536,6 +536,16 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   ok(res, { session });
 });
 
+// Permanently delete a contact (and its messages / asks / grants / requests).
+// Kills any live terminal first. Irreversible — distinct from archive (PATCH).
+app.delete('/api/sessions/:id', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  killPty(id);
+  const removed = store.deleteSession(id);
+  ok(res, { ok: removed });
+});
+
 app.get('/api/health', (_req: Request, res: Response) =>
   res.json({ ok: true, version: VERSION, ts: Date.now() })
 );
@@ -668,6 +678,7 @@ function broadcast(payload: unknown) {
 }
 bus.on('session', (session) => broadcast({ type: 'session', session }));
 bus.on('message', (message) => broadcast({ type: 'message', message }));
+bus.on('sessionRemoved', (id) => broadcast({ type: 'session-removed', id }));
 
 server.requestTimeout = 0; // allow long-poll /wait without being killed
 server.listen(PORT, () => {

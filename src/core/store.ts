@@ -507,6 +507,42 @@ export function setArchived(id: string, archived: boolean): Session | undefined 
   return updated;
 }
 
+const deleteSessionRow = db.prepare(`DELETE FROM sessions WHERE id = ?`);
+const deleteSessionMessages = db.prepare(
+  `DELETE FROM messages WHERE sessionId = ? OR fromSessionId = ?`,
+);
+const deleteSessionAsks = db.prepare(`DELETE FROM asks WHERE sessionId = ?`);
+const deleteSessionGrants = db.prepare(`DELETE FROM grants WHERE fromId = ? OR toId = ?`);
+const deleteSessionContactRequests = db.prepare(
+  `DELETE FROM contact_requests WHERE fromId = ? OR toId = ?`,
+);
+
+/**
+ * Permanently remove a contact and everything attached to it: its messages
+ * (incoming and the peer messages it sent), asks, authorization grants on either
+ * side, and contact requests. Irreversible (unlike archive). Emits
+ * 'sessionRemoved' so any connected client drops it live.
+ */
+export function deleteSession(id: string): boolean {
+  const s = getSession(id);
+  if (!s) return false;
+  const tx = db.transaction(() => {
+    deleteSessionMessages.run(id, id);
+    deleteSessionAsks.run(id);
+    deleteSessionGrants.run(id, id);
+    deleteSessionContactRequests.run(id, id);
+    deleteSessionRow.run(id);
+  });
+  tx();
+  // Drop any pending-launch slot pointing at this session.
+  if (s.workPath) {
+    const key = normWorkPath(s.workPath);
+    if (pendingLaunch.get(key)?.sessionId === id) pendingLaunch.delete(key);
+  }
+  bus.emit('sessionRemoved', id);
+  return true;
+}
+
 const updateSessionTrustTier = db.prepare(
   `UPDATE sessions SET trustTier = @trustTier, updatedAt = @updatedAt WHERE id = @id`
 );

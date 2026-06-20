@@ -7,6 +7,7 @@ import type { Session, Message } from './types';
 type Events = {
   session: (s: Session) => void;
   message: (m: Message) => void;
+  sessionRemoved: (id: string) => void;
 };
 
 class TypedBus extends EventEmitter {

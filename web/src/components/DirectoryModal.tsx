@@ -19,6 +19,7 @@ import {
 import { Avatar } from "./Avatar";
 import { isOnline, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import { useStore } from "../lib/store";
 
 interface Props {
   open: boolean;
@@ -37,10 +38,12 @@ const STATUS_COLOR: Record<Session["status"], string> = {
 
 export function DirectoryModal({ open, onClose, onSelect }: Props) {
   const { t } = useI18n();
+  const { deleteSession } = useStore();
   const [agents, setAgents] = useState<Session[]>([]);
   const [grants, setGrants] = useState<Grant[]>([]);
   const [showArchived, setShowArchived] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [confirmId, setConfirmId] = useState<string | null>(null);
 
   // Grant builder state.
   const [fromId, setFromId] = useState("");
@@ -194,7 +197,7 @@ export function DirectoryModal({ open, onClose, onSelect }: Props) {
                 const online = isOnline(a, Date.now());
                 const tier = a.trustTier ?? "standard";
                 return (
-                  <li key={a.id}>
+                  <li key={a.id} className="flex items-center gap-1">
                     <button
                       onClick={() => {
                         if (onSelect) {
@@ -202,7 +205,7 @@ export function DirectoryModal({ open, onClose, onSelect }: Props) {
                           onClose();
                         }
                       }}
-                      className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors"
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors"
                       style={{ background: "transparent" }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.background = "var(--surface-hover)";
@@ -257,6 +260,36 @@ export function DirectoryModal({ open, onClose, onSelect }: Props) {
                         {t(`trust.${tier}`)}
                       </span>
                     </button>
+                    {confirmId === a.id ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          onClick={() => { void deleteSession(a.id); setConfirmId(null); }}
+                          className="rounded-md px-2 py-1 text-[11px] font-semibold"
+                          style={{ color: "#fff", background: "var(--danger)", border: "1px solid var(--danger)" }}
+                        >
+                          {t("profile.deleteYes")}
+                        </button>
+                        <button
+                          onClick={() => setConfirmId(null)}
+                          className="rounded-md px-2 py-1 text-[11px] font-medium"
+                          style={{ color: "var(--text-secondary)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
+                        >
+                          {t("profile.deleteCancel")}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmId(a.id)}
+                        aria-label={t("profile.delete")}
+                        title={t("profile.delete")}
+                        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
+                        style={{ color: "var(--text-muted)" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "var(--danger)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-muted)"; }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </li>
                 );
               })}
