@@ -59,14 +59,39 @@ function storeOps(): AgentOps {
       }));
     },
     async peerNotify(fromId, targetId, text) {
+      // Enforce the same authorization the REST routes do (the in-process path
+      // must not bypass the visibility/approval gate).
+      const v = store.resolvePeerPermission(fromId, targetId);
+      if (v !== 'allow') {
+        throw new Error(
+          v === 'approval'
+            ? 'contact requires guardian approval'
+            : 'not authorized to contact this agent',
+        );
+      }
       store.peerNotify(fromId, targetId, text);
     },
     async peerAsk(fromId, targetId, question, options) {
+      const v = store.resolvePeerPermission(fromId, targetId);
+      if (v !== 'allow') {
+        throw new Error(
+          v === 'approval'
+            ? 'contact requires guardian approval'
+            : 'not authorized to contact this agent',
+        );
+      }
       const a = store.peerAsk(fromId, targetId, question, options ?? null);
       return { askId: a.id };
     },
     async peerReply(answererId, askId, text) {
       store.agentAnswer(askId, text, answererId);
+    },
+    async requestContact(fromId, targetId, reason) {
+      const v = store.resolvePeerPermission(fromId, targetId);
+      if (v === 'allow') return { status: 'allowed' };
+      if (v === 'deny') throw new Error('not eligible to contact this agent');
+      const cr = store.createContactRequest(fromId, targetId, reason ?? null);
+      return { status: 'pending', askId: cr.askId };
     },
   };
 }

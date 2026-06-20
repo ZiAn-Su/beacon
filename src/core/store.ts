@@ -18,6 +18,7 @@ import type {
   TrustTier,
   Grant,
   GrantEffect,
+  ContactRequest,
 } from './types';
 import { SESSION_STATUSES, TRUST_TIERS } from './types';
 import { getSettings } from './settings';
@@ -75,6 +76,17 @@ CREATE TABLE IF NOT EXISTS grants (
   createdAt INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_grants_pair ON grants(fromId, toId);
+CREATE TABLE IF NOT EXISTS contact_requests (
+  id TEXT PRIMARY KEY,
+  fromId TEXT NOT NULL,
+  toId TEXT NOT NULL,
+  askId TEXT NOT NULL,
+  reason TEXT,
+  status TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  decidedAt INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_cr_ask ON contact_requests(askId);
 `);
 
 // Additive migrations: bring older databases (created before a column existed)
@@ -569,6 +581,9 @@ export function reply(
   });
   if (isAnswer) {
     updateAskAnswer.run({ id: askId, answer: text, answeredAt: now() });
+    // If this ask backs an agent-initiated contact request, record the decision
+    // and mint the allow grant before unblocking the requester.
+    settleContactRequestForAsk(askId!, text);
     const session = getSession(sessionId);
     if (session && session.status === 'waiting') setStatus(sessionId, 'working');
     flushWaiters(getAsk(askId!)!);
@@ -726,6 +741,95 @@ export function listGrants(): Grant[] {
 
 export function getGrantForPair(fromId: string, toId: string): Grant | undefined {
   return selectGrantByPair.get(fromId, toId) as Grant | undefined;
+}
+
+// ---------- contact requests (agent-initiated, guardian-approved) ----------
+const insertCR = db.prepare(
+  `INSERT INTO contact_requests (id, fromId, toId, askId, reason, status, createdAt, decidedAt)
+   VALUES (@id, @fromId, @toId, @askId, @reason, @status, @createdAt, @decidedAt)`
+);
+const selectCRByAsk = db.prepare(`SELECT * FROM contact_requests WHERE askId = ?`);
+const selectPendingCRByPair = db.prepare(
+  `SELECT * FROM contact_requests WHERE fromId = ? AND toId = ? AND status = 'pending' LIMIT 1`
+);
+const selectCRs = db.prepare(`SELECT * FROM contact_requests ORDER BY createdAt DESC`);
+const updateCRDecision = db.prepare(
+  `UPDATE contact_requests SET status = @status, decidedAt = @decidedAt WHERE id = @id`
+);
+
+const CONTACT_APPROVE = 'approve';
+const CONTACT_DENY = 'deny';
+
+/**
+ * Agent-initiated request to contact `toId`. Surfaces to the guardian as an Ask
+ * on the requester's own thread (options approve/deny); the requester goes
+ * 'waiting' until the human answers. Idempotent per pending pair. The Ask's
+ * question/options are stable ASCII tokens — the UI renders a localized card off
+ * the message's `contactRequest` meta. Returns the request (with its askId).
+ */
+export function createContactRequest(
+  fromId: string,
+  toId: string,
+  reason: string | null,
+): ContactRequest {
+  const from = getSession(fromId);
+  const to = getSession(toId);
+  if (!from || !to) throw new Error('session not found');
+  const existing = selectPendingCRByPair.get(fromId, toId) as ContactRequest | undefined;
+  if (existing) return existing;
+
+  const askId = randomUUID();
+  const ask: Ask = {
+    id: askId,
+    sessionId: fromId,
+    question: `${from.title ?? from.task} -> ${to.title ?? to.task}`,
+    options: [CONTACT_APPROVE, CONTACT_DENY],
+    status: 'pending',
+    answer: null,
+    createdAt: now(),
+    answeredAt: null,
+  };
+  insertAsk.run({ ...ask, options: JSON.stringify(ask.options) });
+  addMessage({
+    sessionId: fromId,
+    direction: 'agent',
+    kind: 'ask',
+    text: ask.question,
+    askId,
+    meta: { options: ask.options, contactRequest: { fromId, toId, reason } },
+  });
+
+  const cr: ContactRequest = {
+    id: randomUUID(),
+    fromId,
+    toId,
+    askId,
+    reason,
+    status: 'pending',
+    createdAt: now(),
+    decidedAt: null,
+  };
+  insertCR.run(cr);
+  setStatus(fromId, 'waiting'); // blocked on the guardian's decision
+  return cr;
+}
+
+export function listContactRequests(): ContactRequest[] {
+  return selectCRs.all() as ContactRequest[];
+}
+
+// Called from reply() when a guardian answers an Ask that backs a contact
+// request: record the decision and, on approval, mint the allow Grant.
+function settleContactRequestForAsk(askId: string, answerText: string): void {
+  const cr = selectCRByAsk.get(askId) as ContactRequest | undefined;
+  if (!cr || cr.status !== 'pending') return;
+  const approved = answerText.trim() === CONTACT_APPROVE;
+  updateCRDecision.run({
+    id: cr.id,
+    status: approved ? 'approved' : 'denied',
+    decidedAt: now(),
+  });
+  if (approved) setGrant(cr.fromId, cr.toId, 'allow');
 }
 
 // Normalize a work path for scope comparison: unify slashes, drop trailing

@@ -247,6 +247,27 @@ app.post('/api/sessions/:id/peer-reply', (req: Request, res: Response) => {
   ok(res, { ok: true });
 });
 
+// Agent-initiated request to be allowed to contact another agent. Only valid
+// when the verdict is 'approval' (visible peer, standard tier, no standing
+// grant): creates a guardian approval the human answers. 'allow' => already
+// authorized (no-op); 'deny' => not eligible (not visible). body { targetId, reason? }.
+app.post('/api/sessions/:id/request-contact', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const targetId = String(req.body?.targetId ?? '');
+  const reason = req.body?.reason != null ? String(req.body.reason) : null;
+  if (!store.getSession(param(req, 'id'))) return notFound(res);
+  if (!store.getSession(targetId)) return notFound(res);
+  store.touchSeen(param(req, 'id'));
+  const verdict = store.resolvePeerPermission(param(req, 'id'), targetId);
+  if (verdict === 'allow') { ok(res, { status: 'allowed' }); return; }
+  if (verdict === 'deny') {
+    res.status(403).json({ error: 'not eligible to contact this agent' });
+    return;
+  }
+  const cr = store.createContactRequest(param(req, 'id'), targetId, reason);
+  ok(res, { status: 'pending', askId: cr.askId, requestId: cr.id });
+});
+
 // ----------------------------------------------------------------------------
 // North API — consumed by the human-facing UI
 // ----------------------------------------------------------------------------
@@ -273,6 +294,12 @@ const VALID_GRANT_EFFECT = ['allow', 'deny'] as const;
 
 app.get('/api/grants', (_req: Request, res: Response) => {
   ok(res, { grants: store.listGrants() });
+});
+
+// Contact requests (agent-initiated) for human observability — pending ones are
+// also answerable inline as the ask they back.
+app.get('/api/contact-requests', (_req: Request, res: Response) => {
+  ok(res, { requests: store.listContactRequests() });
 });
 
 app.post('/api/grants', (req: Request, res: Response) => {

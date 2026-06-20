@@ -40,12 +40,25 @@ export interface AgentOps {
     options?: string[] | null,
   ): Promise<{ askId: string }>;
   peerReply(answererId: string, askId: string, text: string): Promise<void>;
+  requestContact(
+    fromId: string,
+    targetId: string,
+    reason?: string | null,
+  ): Promise<{ status: string; askId?: string }>;
 }
 
 export interface AgentDefaults {
   runtime: string;
   workPath: string;
   task: string;
+}
+
+// Guidance returned when a peer message is blocked pending guardian approval.
+function needsApprovalHint(agentId: string): string {
+  return (
+    `Not authorized to contact ${agentId} yet — your guardian must approve. ` +
+    `Call request_contact(agent_id: "${agentId}") to ask; once approved, retry.`
+  );
 }
 
 /**
@@ -229,7 +242,16 @@ export function registerBeaconTools(
     },
     async ({ agent_id, message }) => {
       const id = await ensure();
-      await ops.peerNotify(id, agent_id, message);
+      try {
+        await ops.peerNotify(id, agent_id, message);
+      } catch (e) {
+        if (String(e).includes('approval')) {
+          return {
+            content: [{ type: 'text', text: needsApprovalHint(agent_id) }],
+          };
+        }
+        throw e;
+      }
       return { content: [{ type: 'text', text: 'Delivered to agent.' }] };
     },
   );
@@ -252,7 +274,15 @@ export function registerBeaconTools(
     },
     async ({ agent_id, question, options }) => {
       const id = await ensure();
-      const { askId } = await ops.peerAsk(id, agent_id, question, options);
+      let askId: string;
+      try {
+        ({ askId } = await ops.peerAsk(id, agent_id, question, options));
+      } catch (e) {
+        if (String(e).includes('approval')) {
+          return { content: [{ type: 'text', text: needsApprovalHint(agent_id) }] };
+        }
+        throw e;
+      }
       for (;;) {
         const ask = await ops.waitAsk(askId, 25000);
         if (ask.status === 'answered') {
@@ -266,6 +296,54 @@ export function registerBeaconTools(
           };
         }
         // still pending — loop and wait again
+      }
+    },
+  );
+
+  server.registerTool(
+    'request_contact',
+    {
+      title: 'Request permission to contact another agent',
+      description:
+        'Ask your guardian (the human) for permission to message an agent you can see via ' +
+        'list_agents but are not yet authorized to contact. BLOCKS until the human approves or ' +
+        'denies. After approval, use notify_agent / ask_agent normally.',
+      inputSchema: {
+        agent_id: z.string().describe('Target agent session id (from list_agents)'),
+        reason: z
+          .string()
+          .optional()
+          .describe('Why you want to contact them (shown to the human)'),
+      },
+    },
+    async ({ agent_id, reason }) => {
+      const id = await ensure();
+      const r = await ops.requestContact(id, agent_id, reason);
+      if (r.status === 'allowed') {
+        return {
+          content: [{ type: 'text', text: 'Already authorized — you can message this agent now.' }],
+        };
+      }
+      const askId = r.askId!;
+      for (;;) {
+        const ask = await ops.waitAsk(askId, 25000);
+        if (ask.status === 'answered') {
+          const approved = (ask.answer ?? '').trim() === 'approve';
+          return {
+            content: [
+              {
+                type: 'text',
+                text: approved
+                  ? 'Approved — you can message this agent now.'
+                  : 'Denied by the guardian.',
+              },
+            ],
+          };
+        }
+        if (ask.status === 'cancelled') {
+          return { content: [{ type: 'text', text: 'The request was dismissed.' }] };
+        }
+        // still pending — keep waiting
       }
     },
   );
@@ -401,6 +479,12 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         method: 'POST',
         body: JSON.stringify({ askId, text }),
       });
+    },
+    async requestContact(fromId, targetId, reason) {
+      return api<{ status: string; askId?: string }>(
+        `/api/sessions/${fromId}/request-contact`,
+        { method: 'POST', body: JSON.stringify({ targetId, reason }) },
+      );
     },
   };
 }

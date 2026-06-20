@@ -91,6 +91,22 @@ export interface Grant {
   createdAt: number;
 }
 
+// An agent-initiated request to be allowed to contact another agent. It surfaces
+// to the guardian as a normal Ask (options 'approve' | 'deny'); approving it
+// mints an allow Grant. Lets authorization flow agent -> human, not only human.
+export type ContactRequestStatus = 'pending' | 'approved' | 'denied';
+
+export interface ContactRequest {
+  id: string;
+  fromId: string;
+  toId: string;
+  askId: string; // the guardian-facing Ask the human answers
+  reason: string | null;
+  status: ContactRequestStatus;
+  createdAt: number;
+  decidedAt: number | null;
+}
+
 export type AskStatus = 'pending' | 'answered' | 'cancelled';
 
 export interface Ask {
