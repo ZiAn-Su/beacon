@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BellOff, Moon, Sun, X } from "lucide-react";
+import { Bell, BellOff, Moon, PanelLeftOpen, Sun, X } from "lucide-react";
 import { Rail } from "./components/Rail";
+import { Resizer } from "./components/Resizer";
 import { ContactList } from "./components/ContactList";
 import { ContactsView } from "./components/ContactsView";
 import { Conversation } from "./components/Conversation";
@@ -32,6 +33,27 @@ function readInitialTheme(): Theme {
     : "dark";
 }
 
+// Persisted, drag-resizable column widths (desktop). Defaults match the prior
+// fixed widths; clamp keeps them usable.
+const LIST_W_KEY = "interact-list-w";
+const INFO_W_KEY = "interact-info-w";
+const LIST_W_DEFAULT = 264;
+const INFO_W_DEFAULT = 300;
+const RAIL_W = 56; // matches the md rail width (w-14)
+
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+function readNum(key: string, def: number): number {
+  if (typeof window === "undefined") return def;
+  try {
+    const v = Number(window.localStorage.getItem(key));
+    return Number.isFinite(v) && v > 0 ? v : def;
+  } catch {
+    return def;
+  }
+}
+
 function Shell() {
   const {
     sessions,
@@ -51,7 +73,10 @@ function Shell() {
   const [mobileView, setMobileView] = useState<"contacts" | "conversation">(
     "contacts",
   );
-  const [infoOpen, setInfoOpen] = useState(true);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [listOpen, setListOpen] = useState(true);
+  const [listW, setListW] = useState(() => readNum(LIST_W_KEY, LIST_W_DEFAULT));
+  const [infoW, setInfoW] = useState(() => readNum(INFO_W_KEY, INFO_W_DEFAULT));
   const [connectOpen, setConnectOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
@@ -77,6 +102,20 @@ function Shell() {
       // ignore
     }
   }, [theme]);
+
+  // Persist column widths.
+  useEffect(() => {
+    try { window.localStorage.setItem(LIST_W_KEY, String(listW)); } catch { /* ignore */ }
+  }, [listW]);
+  useEffect(() => {
+    try { window.localStorage.setItem(INFO_W_KEY, String(infoW)); } catch { /* ignore */ }
+  }, [infoW]);
+
+  // Drag handlers: a negative clientX (double-click sentinel) resets to default.
+  const resizeList = (clientX: number) =>
+    setListW(clientX < 0 ? LIST_W_DEFAULT : clamp(clientX - RAIL_W, 200, 460));
+  const resizeInfo = (clientX: number) =>
+    setInfoW(clientX < 0 ? INFO_W_DEFAULT : clamp(window.innerWidth - clientX, 240, 520));
 
   // Default-select the first waiting session, then the most recent.
   useEffect(() => {
@@ -190,10 +229,6 @@ function Shell() {
       style={{ background: "var(--bg)" }}
     >
       <Rail
-        theme={theme}
-        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
-        notifPermission={notif.permission}
-        onRequestNotifications={notif.requestPermission}
         onOpenSettings={() => setSettingsOpen(true)}
         view={view}
         onChangeView={setView}
@@ -247,25 +282,47 @@ function Shell() {
 
       {view === "chats" ? (
         <>
-          {/* Left column: Contact list (264px on >=md, full-screen on mobile). */}
-          <div
-            className={
-              "flex h-full min-w-0 flex-1 " +
-              (mobileView === "contacts" ? "block" : "hidden") +
-              " md:block md:w-[264px] md:shrink-0 md:border-r"
-            }
-            style={{ borderColor: "var(--border)" }}
-          >
-            <ContactList
-              sessions={sessions}
-              messagesBySession={messagesBySession}
-              selectedId={selectedId}
-              onSelect={(id) => setSelectedId(id)}
-              onConnectAgent={() => setConnectOpen(true)}
-            />
-          </div>
+          {/* Left column: Contact list — full-screen on mobile; resizable & collapsible on >=md. */}
+          {listOpen ? (
+            <>
+              <div
+                className={
+                  "flex h-full min-w-0 flex-1 md:flex-none " +
+                  (mobileView === "contacts" ? "block" : "hidden") +
+                  " md:block md:w-[var(--lw)] md:shrink-0 md:border-r"
+                }
+                style={{ borderColor: "var(--border)", ["--lw" as string]: `${listW}px` }}
+              >
+                <ContactList
+                  sessions={sessions}
+                  messagesBySession={messagesBySession}
+                  selectedId={selectedId}
+                  onSelect={(id) => setSelectedId(id)}
+                  onConnectAgent={() => setConnectOpen(true)}
+                  onCollapse={() => setListOpen(false)}
+                />
+              </div>
+              <Resizer onResize={resizeList} ariaLabel={t("app.resizeList")} />
+            </>
+          ) : (
+            // Collapsed: a slim strip with an expand button (desktop only).
+            <div
+              className="hidden md:flex h-full w-9 shrink-0 flex-col items-center border-r py-3"
+              style={{ borderColor: "var(--border)", background: "var(--bg-sidebar)" }}
+            >
+              <button
+                onClick={() => setListOpen(true)}
+                aria-label={t("app.showList")}
+                title={t("app.showList")}
+                className="flex h-8 w-8 items-center justify-center rounded-lg"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            </div>
+          )}
 
-          {/* Center column: Conversation (always visible at >=md; full-screen on mobile when selected). */}
+          {/* Center column: Conversation. */}
           <div
             className={
               "min-w-0 flex-1 " +
@@ -293,14 +350,17 @@ function Shell() {
             )}
           </div>
 
-          {/* Right column: SessionInfo (280px on >=lg; toggleable on >=md/<lg; hidden <md). */}
+          {/* Right column: SessionInfo — resizable; toggled by the header (off by default). */}
           {selected && infoOpen && (
-            <div
-              className="hidden md:block md:w-[280px] md:shrink-0 md:border-l"
-              style={{ borderColor: "var(--border)" }}
-            >
-              <SessionInfo session={selected} now={now} />
-            </div>
+            <>
+              <Resizer onResize={resizeInfo} ariaLabel={t("app.resizeInfo")} />
+              <div
+                className="hidden md:block md:shrink-0 md:border-l"
+                style={{ borderColor: "var(--border)", width: `${infoW}px` }}
+              >
+                <SessionInfo session={selected} now={now} />
+              </div>
+            </>
           )}
         </>
       ) : (
@@ -353,7 +413,14 @@ function Shell() {
         onSelect={(id) => setSelectedId(id)}
       />
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        notifPermission={notif.permission}
+        onRequestNotifications={notif.requestPermission}
+      />
     </div>
   );
 }

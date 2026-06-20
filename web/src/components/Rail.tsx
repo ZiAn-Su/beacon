@@ -1,13 +1,9 @@
-import { Bell, BellOff, BookUser, Languages, MessageSquare, Moon, Settings, Sun } from "lucide-react";
+import { BookUser, MessageSquare, Settings } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 
 type View = "chats" | "contacts";
 
 interface Props {
-  theme: "dark" | "light";
-  onToggleTheme: () => void;
-  notifPermission: "default" | "granted" | "denied" | "unsupported";
-  onRequestNotifications: () => Promise<unknown>;
   onOpenSettings: () => void;
   view: View;
   onChangeView: (v: View) => void;
@@ -15,17 +11,8 @@ interface Props {
   unread?: number;
 }
 
-export function Rail({
-  theme,
-  onToggleTheme,
-  notifPermission,
-  onRequestNotifications,
-  onOpenSettings,
-  view,
-  onChangeView,
-  unread = 0,
-}: Props) {
-  const { t, lang, toggleLang } = useI18n();
+export function Rail({ onOpenSettings, view, onChangeView, unread = 0 }: Props) {
+  const { t } = useI18n();
   return (
     <aside
       className="hidden md:flex w-14 shrink-0 flex-col items-center justify-between border-r py-4"
@@ -48,44 +35,6 @@ export function Rail({
         >
           <BookUser size={18} />
         </NavButton>
-        {notifPermission !== "unsupported" && (
-          <button
-            onClick={() => void onRequestNotifications()}
-            aria-label={
-              notifPermission === "granted"
-                ? t("rail.notifOn")
-                : t("rail.notifEnable")
-            }
-            title={
-              notifPermission === "granted"
-                ? t("rail.notifOn")
-                : notifPermission === "denied"
-                  ? t("rail.notifBlocked")
-                  : t("rail.notifEnable")
-            }
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150"
-            style={{
-              color:
-                notifPermission === "granted"
-                  ? "var(--accent)"
-                  : "var(--text-secondary)",
-              background: "transparent",
-              border: "1px solid transparent",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--surface-hover)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-            }}
-          >
-            {notifPermission === "granted" ? (
-              <Bell size={16} />
-            ) : (
-              <BellOff size={16} />
-            )}
-          </button>
-        )}
       </div>
       <div className="flex flex-col items-center gap-3">
         <button
@@ -106,57 +55,6 @@ export function Rail({
           }}
         >
           <Settings size={17} />
-        </button>
-        <button
-          onClick={toggleLang}
-          aria-label={lang === "zh" ? t("rail.langToEn") : t("rail.langToZh")}
-          title={lang === "zh" ? t("rail.langToEn") : t("rail.langToZh")}
-          className="relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150"
-          style={{
-            color: "var(--text-secondary)",
-            background: "transparent",
-            border: "1px solid transparent",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--surface-hover)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
-        >
-          <Languages size={17} />
-          <span
-            className="absolute -bottom-0.5 -right-0.5 rounded px-0.5 text-[8px] font-bold leading-none"
-            style={{
-              color: "var(--accent)",
-              background: "var(--bg)",
-            }}
-          >
-            {t("rail.langBadge")}
-          </span>
-        </button>
-        <button
-          onClick={onToggleTheme}
-          aria-label={
-            theme === "dark" ? t("rail.themeToLight") : t("rail.themeToDark")
-          }
-          title={
-            theme === "dark" ? t("rail.themeToLight") : t("rail.themeToDark")
-          }
-          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150"
-          style={{
-            color: "var(--text-secondary)",
-            background: "transparent",
-            border: "1px solid transparent",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--surface-hover)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-          }}
-        >
-          {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
         </button>
       </div>
     </aside>

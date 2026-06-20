@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Settings as SettingsIcon, X } from "lucide-react";
+import { Bell, BellOff, Languages, Moon, Settings as SettingsIcon, Sun, X } from "lucide-react";
 import { useStore } from "../lib/store";
 import { useI18n } from "../lib/i18n";
 import type { AppSettings } from "../lib/api";
@@ -7,10 +7,14 @@ import type { AppSettings } from "../lib/api";
 interface Props {
   open: boolean;
   onClose: () => void;
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
+  notifPermission: "default" | "granted" | "denied" | "unsupported";
+  onRequestNotifications: () => Promise<unknown>;
 }
 
-export function SettingsModal({ open, onClose }: Props) {
-  const { t } = useI18n();
+export function SettingsModal({ open, onClose, theme, onToggleTheme, notifPermission, onRequestNotifications }: Props) {
+  const { t, lang, toggleLang } = useI18n();
   const { settings, updateSettings } = useStore();
 
   useEffect(() => {
@@ -172,6 +176,53 @@ export function SettingsModal({ open, onClose }: Props) {
               );
             })}
           </div>
+
+          {/* Appearance + language + notifications — consolidated here from the rail. */}
+          <div
+            className="mb-2.5 mt-6 text-[10.5px] font-semibold uppercase tracking-wider"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {t("settings.generalHeading")}
+          </div>
+          <div className="flex flex-col gap-2.5">
+            <SettingRow label={t("settings.theme")}>
+              <SegBtn
+                active={theme === "light"}
+                onClick={() => { if (theme !== "light") onToggleTheme(); }}
+                icon={<Sun size={13} />}
+                label={t("settings.themeLight")}
+              />
+              <SegBtn
+                active={theme === "dark"}
+                onClick={() => { if (theme !== "dark") onToggleTheme(); }}
+                icon={<Moon size={13} />}
+                label={t("settings.themeDark")}
+              />
+            </SettingRow>
+            <SettingRow label={t("settings.language")}>
+              <SegBtn active={lang === "zh"} onClick={() => { if (lang !== "zh") toggleLang(); }} icon={<Languages size={13} />} label={t("settings.langZh")} />
+              <SegBtn active={lang === "en"} onClick={() => { if (lang !== "en") toggleLang(); }} icon={<Languages size={13} />} label={t("settings.langEn")} />
+            </SettingRow>
+            {notifPermission !== "unsupported" && (
+              <SettingRow label={t("settings.notifications")}>
+                {notifPermission === "granted" ? (
+                  <span className="inline-flex items-center gap-1.5 text-[12.5px]" style={{ color: "var(--green)" }}>
+                    <Bell size={13} /> {t("rail.notifOn")}
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => void onRequestNotifications()}
+                    disabled={notifPermission === "denied"}
+                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12.5px] font-medium disabled:opacity-50"
+                    style={{ color: "var(--text)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
+                  >
+                    <BellOff size={13} />
+                    {notifPermission === "denied" ? t("rail.notifBlocked") : t("rail.notifEnable")}
+                  </button>
+                )}
+              </SettingRow>
+            )}
+          </div>
         </div>
 
         <div
@@ -188,5 +239,44 @@ export function SettingsModal({ open, onClose }: Props) {
         </div>
       </div>
     </div>
+  );
+}
+
+function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div
+      className="flex items-center justify-between gap-3 rounded-xl px-3.5 py-2.5"
+      style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
+    >
+      <span className="text-[13px]" style={{ color: "var(--text)" }}>{label}</span>
+      <div className="flex shrink-0 items-center gap-1">{children}</div>
+    </div>
+  );
+}
+
+function SegBtn({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[12.5px] font-medium transition-colors"
+      style={{
+        color: active ? "#fff" : "var(--text-secondary)",
+        background: active ? "var(--accent)" : "var(--bg-sidebar)",
+        border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+      }}
+    >
+      {icon}
+      {label}
+    </button>
   );
 }
