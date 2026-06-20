@@ -22,6 +22,49 @@ export async function listSessions(): Promise<Session[]> {
   return data.sessions;
 }
 
+// The full agent roster (single-user => every session is an agent/contact),
+// including archived ones. The directory filters as needed.
+export async function listAgents(): Promise<Session[]> {
+  const r = await fetch("/api/agents");
+  const data = await json<{ agents: Session[] }>(r);
+  return data.agents;
+}
+
+// A per-pair authorization edge (fromId -> toId) overriding the sender's
+// trust tier for agent-to-agent messaging.
+export interface Grant {
+  id: string;
+  fromId: string;
+  toId: string;
+  effect: "allow" | "deny";
+  createdAt: number;
+}
+
+export async function listGrants(): Promise<Grant[]> {
+  const r = await fetch("/api/grants");
+  return (await json<{ grants: Grant[] }>(r)).grants;
+}
+
+export async function createGrant(
+  fromId: string,
+  toId: string,
+  effect: "allow" | "deny",
+): Promise<Grant> {
+  const r = await fetch("/api/grants", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fromId, toId, effect }),
+  });
+  return (await json<{ grant: Grant }>(r)).grant;
+}
+
+export async function deleteGrant(id: string): Promise<void> {
+  const r = await fetch(`/api/grants/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  await json<{ ok: boolean }>(r);
+}
+
 export interface Conversation {
   session: Session;
   messages: Message[];

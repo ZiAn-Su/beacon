@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Archive, Bot, ChevronDown, ChevronRight, Inbox, Plus, Sparkles } from "lucide-react";
+import { Archive, BookUser, Bot, ChevronDown, ChevronRight, Inbox, Plus, Sparkles } from "lucide-react";
 import type { Message, Session } from "../types";
 import { ContactCard } from "./ContactCard";
 import { EmptyState } from "./EmptyState";
@@ -13,6 +13,7 @@ interface Props {
   selectedId: string | null;
   onSelect: (id: string) => void;
   onConnectAgent?: () => void;
+  onOpenDirectory?: () => void;
 }
 
 type GroupKey = "waiting" | "active" | "done";
@@ -31,6 +32,7 @@ export function ContactList({
   selectedId,
   onSelect,
   onConnectAgent,
+  onOpenDirectory,
 }: Props) {
   const { t } = useI18n();
   // Re-render the relative timestamps periodically.
@@ -183,6 +185,29 @@ export function ContactList({
             <Inbox size={11} />
             {active.length}
           </span>
+          {onOpenDirectory && (
+            <button
+              onClick={onOpenDirectory}
+              aria-label={t("dir.openAria")}
+              title={t("dir.title")}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150"
+              style={{
+                background: "var(--surface-card)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--surface-hover)";
+                e.currentTarget.style.borderColor = "var(--border-strong)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "var(--surface-card)";
+                e.currentTarget.style.borderColor = "var(--border)";
+              }}
+            >
+              <BookUser size={13} />
+            </button>
+          )}
           {onConnectAgent && (
             <button
               onClick={onConnectAgent}

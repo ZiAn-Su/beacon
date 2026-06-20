@@ -6,6 +6,7 @@ import { Conversation } from "./components/Conversation";
 import { SessionInfo } from "./components/SessionInfo";
 import { EmptyState } from "./components/EmptyState";
 import { ConnectAgentModal } from "./components/ConnectAgentModal";
+import { DirectoryModal } from "./components/DirectoryModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { StoreProvider, useStore } from "./lib/store";
 import { useDocumentTitle } from "./lib/useDocumentTitle";
@@ -48,6 +49,7 @@ function Shell() {
   );
   const [infoOpen, setInfoOpen] = useState(true);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const notif = useDesktopNotifications();
 
@@ -250,6 +252,7 @@ function Shell() {
           selectedId={selectedId}
           onSelect={(id) => setSelectedId(id)}
           onConnectAgent={() => setConnectOpen(true)}
+          onOpenDirectory={() => setDirectoryOpen(true)}
         />
       </div>
 
@@ -304,6 +307,12 @@ function Shell() {
       <ConnectAgentModal
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
+      />
+
+      <DirectoryModal
+        open={directoryOpen}
+        onClose={() => setDirectoryOpen(false)}
+        onSelect={(id) => setSelectedId(id)}
       />
 
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
