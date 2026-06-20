@@ -211,3 +211,68 @@ curl -s -X POST $B/api/sessions/register -d '{"runtime":"t","task":"y","bindKey"
 - 不动任何 `web/**`、README、`company/**`、设计文档。
 - 不做 P4 的能力/Grant/审批/作用域过滤;只做 `agentComm` 全局开关。
 - 不引入 channel 表。不删除/重命名现有导出函数。
+
+---
+
+## Phase 3b 规格(agent 侧接入面:MCP 两路 + skill CLI)—— 本次实现
+
+> 后端端点已就绪且验过(`peer-notify`/`peer-ask`/`peer-reply`/`GET /api/agents`)。本阶段把它们暴露给
+> agent。约定同前(ESM / src 无中文 / 向后兼容 / 不删改现有导出)。**只动 agent 接入面,不动 core/gateway/web。**
+
+### 可触文件(仅此三个)
+- `src/mcp/tools.ts` —— `AgentOps` 接口扩展、`registerBeaconTools` 新工具、`httpOps` 实现
+- `src/server/mcp-http.ts` —— `storeOps` 实现新 ops(直连 store/HTTP 皆可,见下)
+- `skill/beacon/beacon.mjs` —— 新增 CLI 子命令
+
+### A. AgentOps 扩展(`src/mcp/tools.ts`)
+
+新增方法(都接已存在的后端端点 / store):
+```
+listAgents(): Promise<{ id: string; task: string; status: string; runtime: string }[]>
+peerNotify(fromId, targetId, text): Promise<void>
+peerAsk(fromId, targetId, question, options?): Promise<{ askId: string }>
+peerReply(answererId, askId, text): Promise<void>
+```
+并**加宽 `inbox` 返回**(加可选字段,向后兼容):
+```
+inbox(id, after): Promise<{ text; createdAt; kind?: string; fromSessionId?: string | null; askId?: string | null }[]>
+```
+- `httpOps`:listAgents→`GET /api/agents`(返回 `agents`,映射 id/task/status/runtime);peerNotify→`POST /api/sessions/{fromId}/peer-notify {targetId,text}`;peerAsk→`POST .../peer-ask {targetId,question,options}`;peerReply→`POST /api/sessions/{answererId}/peer-reply {askId,text}`;inbox 改为透传 `kind/fromSessionId/askId`(后端 inbox 已返回完整 message)。
+- `storeOps`(mcp-http.ts):listAgents→`store.listSessions()` 映射;peerNotify→`store.peerNotify`;peerAsk→`store.peerAsk(...)`→`{askId}`;peerReply→`store.agentAnswer(askId, text, answererId)`;inbox 映射时带上 `kind/fromSessionId/askId`。
+
+### B. 新增 4 个工具(`registerBeaconTools`)
+
+- `list_agents`(无输入):列出**其他**联系人(排除自己 sessionId),格式 `<id> — <task> [<status>]`;空则提示无其他 agent。
+- `notify_agent`(`agent_id`, `message`):`ensure()` 拿自身 id → `peerNotify(self, agent_id, message)` → "Delivered to agent."。
+- `ask_agent`(`agent_id`, `question`, `options?`):`ensure()` → `peerAsk(self, agent_id, question, options)` → 拿 askId → **复用现有 waitAsk 循环**(同 ask_human)→ 返回对方答复;cancelled 时给出对应文案。
+- `answer_agent`(`ask_id`, `answer`):`ensure()` → `peerReply(self, ask_id, answer)` → "Answered."。
+
+### C. 强化 `check_inbox` 渲染
+
+逐条按 kind 标注,使收方知道**谁发来、是不是需要回答的问题、用什么 ask_id 回答**:
+- `kind==='peer' && askId`:`[QUESTION from agent <fromSessionId>] <text>  (reply with answer_agent ask_id=<askId>)`
+- `kind==='peer'`:`[from agent <fromSessionId>] <text>`
+- 其它(人类 chat):保持原样 `- <text>`
+- 游标 `lastInboxTs` 逻辑不变。
+- (说明:A 问 B 的回答也会回流进 A 的 inbox——属可接受冗余,A 已从 ask_agent 返回拿到答案;不需特殊过滤。)
+
+### D. skill CLI 新增子命令(`skill/beacon/beacon.mjs`)
+
+沿用其 `api()` 与按 work-path 缓存的 sessionId:
+- `agents` → `GET /api/agents`,打印其他联系人 `id — task [status]`。
+- `notify-agent <agentId> <msg...>` → `POST /api/sessions/<self>/peer-notify {targetId,text}`。
+- `ask-agent <agentId> <question> [opt...]` → `POST .../peer-ask` → 循环 `GET /api/asks/<askId>/wait` 打印答复(同 `ask`)。
+- `answer-agent <askId> <answer...>` → `POST /api/sessions/<self>/peer-reply {askId,text}`。
+- 更新顶部 usage 注释与末尾 usage 字符串。
+
+### E. 验收(子智能体自测 + 贴证据)
+
+- `npm run typecheck`、`npm run check:encoding` 必须过。
+- `npm run e2e`(stdio MCP)与 `npm run e2e:http`(托管 HTTP MCP)在隔离实例上**都必须仍过**(证明 5 个原工具未被破坏)。
+- 隔离实例 + 两个真实 MCP/CLI 会话演示一遍 agent↔agent:用 skill CLI 起 A、B,`agents` 能互相看见,A `ask-agent B` 阻塞,B `inbox` 看到带 ask_id 的问题,B `answer-agent <askId>` → A 收到答复解除阻塞。贴真实输出。
+- 清理隔离实例与临时库。
+
+### F. 明确不做
+
+- 不动 `src/core/**`、`src/server/index.ts`(后端已完成且冻结)、`web/**`、README、`company/**`、设计文档。
+- 不删除/重命名任何现有工具或导出。不改 5 个原工具的对外 schema。

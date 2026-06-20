@@ -42,7 +42,31 @@ function storeOps(): AgentOps {
       store.setStatus(id, status);
     },
     async inbox(id, after) {
-      return store.inbox(id, after).map((m) => ({ text: m.text, createdAt: m.createdAt }));
+      return store.inbox(id, after).map((m) => ({
+        text: m.text,
+        createdAt: m.createdAt,
+        kind: m.kind,
+        fromSessionId: m.fromSessionId,
+        askId: m.askId,
+      }));
+    },
+    async listAgents() {
+      return store.listSessions().map((s) => ({
+        id: s.id,
+        task: s.task,
+        status: s.status,
+        runtime: s.runtime,
+      }));
+    },
+    async peerNotify(fromId, targetId, text) {
+      store.peerNotify(fromId, targetId, text);
+    },
+    async peerAsk(fromId, targetId, question, options) {
+      const a = store.peerAsk(fromId, targetId, question, options ?? null);
+      return { askId: a.id };
+    },
+    async peerReply(answererId, askId, text) {
+      store.agentAnswer(askId, text, answererId);
     },
   };
 }

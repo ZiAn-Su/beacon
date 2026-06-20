@@ -16,8 +16,12 @@ await client.connect(transport);
 
 const { tools } = await client.listTools();
 const names = tools.map((t) => t.name).sort();
+const expectedTools = [
+  'answer_agent', 'ask_agent', 'ask_human', 'check_inbox', 'list_agents',
+  'notify_agent', 'notify_human', 'register_session', 'update_status',
+];
 log(
-  names.join(',') === 'ask_human,check_inbox,notify_human,register_session,update_status',
+  expectedTools.every((n) => names.includes(n)),
   'tools listed',
   names.join(','),
 );

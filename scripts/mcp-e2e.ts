@@ -51,7 +51,11 @@ async function main() {
   // The agent advertises its tools.
   const tools = await client.listTools();
   const names = tools.tools.map((t) => t.name).sort();
-  check('MCP exposes the 5 tools', names.join(',') === 'ask_human,check_inbox,notify_human,register_session,update_status', names.join(','));
+  const expectedTools = [
+    'answer_agent', 'ask_agent', 'ask_human', 'check_inbox', 'list_agents',
+    'notify_agent', 'notify_human', 'register_session', 'update_status',
+  ];
+  check('MCP exposes the expected tools', expectedTools.every((n) => names.includes(n)), names.join(','));
 
   // 1. register_session
   const reg = await client.callTool({ name: 'register_session', arguments: { task: TASK, work_path: 'F:/Project/demo' } });

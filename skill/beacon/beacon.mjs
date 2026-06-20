@@ -9,6 +9,12 @@
 //   node beacon.mjs status   <working|waiting|idle|done>
 //   node beacon.mjs inbox                      print messages the human sent since last check
 //
+// Agent-to-agent (peers are other sessions registered on the same platform):
+//   node beacon.mjs agents                     list other agent contacts: id — task [status]
+//   node beacon.mjs notify-agent <id> <msg...> non-blocking FYI to another agent
+//   node beacon.mjs ask-agent    <id> <q> [opt...]   BLOCK until that agent answers; prints answer
+//   node beacon.mjs answer-agent <askId> <ans...>    answer a peer question from your inbox
+//
 // The session id is cached per work-path in the OS temp dir, so notify/ask/inbox
 // across separate CLI calls all belong to the same conversation.
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -32,6 +38,18 @@ const loadCache = () => {
   try { return JSON.parse(readFileSync(cacheFile, 'utf8')); } catch { return {}; }
 };
 const saveCache = (c) => writeFileSync(cacheFile, JSON.stringify(c));
+
+// Annotate peer messages so the recipient knows who sent it and, for a question,
+// which ask_id to answer with. Human chat keeps the original plain bullet form.
+const renderInboxLine = (m) => {
+  if (m.kind === 'peer' && m.askId) {
+    return `[QUESTION from agent ${m.fromSessionId}] ${m.text}  (reply with answer-agent ${m.askId})`;
+  }
+  if (m.kind === 'peer') {
+    return `[from agent ${m.fromSessionId}] ${m.text}`;
+  }
+  return `- ${m.text}`;
+};
 
 async function api(path, body) {
   const res = await fetch(BASE + path, {
@@ -102,9 +120,40 @@ try {
       c.lastInboxTs = messages[messages.length - 1].createdAt;
       saveCache(c);
     }
-    console.log(messages.length ? messages.map((m) => `- ${m.text}`).join('\n') : '(no new messages from the human)');
+    console.log(messages.length ? messages.map(renderInboxLine).join('\n') : '(no new messages from the human)');
+  } else if (cmd === 'agents') {
+    const id = await ensureSession();
+    const { agents } = await api('/api/agents');
+    const others = agents.filter((a) => a.id !== id);
+    console.log(others.length ? others.map((a) => `${a.id} — ${a.task} [${a.status}]`).join('\n') : '(no other agents are registered)');
+  } else if (cmd === 'notify-agent') {
+    const id = await ensureSession();
+    const targetId = args[0] ?? '';
+    await api(`/api/sessions/${id}/peer-notify`, { targetId, text: args.slice(1).join(' ') });
+    console.log('delivered to agent (non-blocking)');
+  } else if (cmd === 'ask-agent') {
+    const id = await ensureSession();
+    const targetId = args[0] ?? '';
+    const question = args[1] ?? '';
+    const options = args.slice(2);
+    const { askId } = await api(`/api/sessions/${id}/peer-ask`, {
+      targetId,
+      question,
+      options: options.length ? options : undefined,
+    });
+    process.stderr.write('waiting for the other agent to answer…\n');
+    for (;;) {
+      const { ask } = await api(`/api/asks/${askId}/wait?timeoutMs=25000`);
+      if (ask.status === 'answered') { console.log(ask.answer ?? ''); break; }
+      if (ask.status === 'cancelled') { console.log('(the other agent dismissed this question without answering)'); break; }
+    }
+  } else if (cmd === 'answer-agent') {
+    const id = await ensureSession();
+    const askId = args[0] ?? '';
+    await api(`/api/sessions/${id}/peer-reply`, { askId, text: args.slice(1).join(' ') });
+    console.log('answered');
   } else {
-    console.log('usage: node beacon.mjs <register [task] | notify <msg> | ask <question> [opt...] | status <s> | inbox>');
+    console.log('usage: node beacon.mjs <register [task] | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...>>');
     process.exit(1);
   }
 } catch (e) {

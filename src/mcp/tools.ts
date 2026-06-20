@@ -19,7 +19,27 @@ export interface AgentOps {
   ask(id: string, question: string, options?: string[] | null): Promise<{ askId: string }>;
   waitAsk(askId: string, timeoutMs: number): Promise<{ status: string; answer: string | null }>;
   setStatus(id: string, status: string): Promise<void>;
-  inbox(id: string, after: number): Promise<{ text: string; createdAt: number }[]>;
+  inbox(
+    id: string,
+    after: number,
+  ): Promise<
+    {
+      text: string;
+      createdAt: number;
+      kind?: string;
+      fromSessionId?: string | null;
+      askId?: string | null;
+    }[]
+  >;
+  listAgents(): Promise<{ id: string; task: string; status: string; runtime: string }[]>;
+  peerNotify(fromId: string, targetId: string, text: string): Promise<void>;
+  peerAsk(
+    fromId: string,
+    targetId: string,
+    question: string,
+    options?: string[] | null,
+  ): Promise<{ askId: string }>;
+  peerReply(answererId: string, askId: string, text: string): Promise<void>;
 }
 
 export interface AgentDefaults {
@@ -171,11 +191,123 @@ export function registerBeaconTools(
       const messages = await ops.inbox(id, lastInboxTs);
       if (messages.length) lastInboxTs = messages[messages.length - 1].createdAt;
       const text = messages.length
-        ? messages.map((m) => `- ${m.text}`).join('\n')
+        ? messages.map(renderInboxLine).join('\n')
         : '(no new messages from the human)';
       return { content: [{ type: 'text', text }] };
     },
   );
+
+  server.registerTool(
+    'list_agents',
+    {
+      title: 'List other agent sessions',
+      description:
+        'List the OTHER agent sessions currently known to the platform (yourself excluded). ' +
+        'Use this to discover peers you can coordinate with via notify_agent / ask_agent.',
+      inputSchema: {},
+    },
+    async () => {
+      const id = await ensure();
+      const agents = (await ops.listAgents()).filter((a) => a.id !== id);
+      const text = agents.length
+        ? agents.map((a) => `${a.id} — ${a.task} [${a.status}]`).join('\n')
+        : '(no other agents are registered)';
+      return { content: [{ type: 'text', text }] };
+    },
+  );
+
+  server.registerTool(
+    'notify_agent',
+    {
+      title: 'Notify another agent (non-blocking)',
+      description:
+        'Send another agent an FYI and keep working. Does not block. Use agent_id from list_agents.',
+      inputSchema: {
+        agent_id: z.string().describe('Target agent session id (from list_agents)'),
+        message: z.string().describe('The message to send to that agent'),
+      },
+    },
+    async ({ agent_id, message }) => {
+      const id = await ensure();
+      await ops.peerNotify(id, agent_id, message);
+      return { content: [{ type: 'text', text: 'Delivered to agent.' }] };
+    },
+  );
+
+  server.registerTool(
+    'ask_agent',
+    {
+      title: 'Ask another agent and wait for an answer',
+      description:
+        'Ask another agent a question and BLOCK until they reply, then return their answer. ' +
+        'Use agent_id from list_agents. Provide options for a quick decision when applicable.',
+      inputSchema: {
+        agent_id: z.string().describe('Target agent session id (from list_agents)'),
+        question: z.string().describe('The question to ask the other agent'),
+        options: z
+          .array(z.string())
+          .optional()
+          .describe('Optional quick-reply choices the other agent can pick'),
+      },
+    },
+    async ({ agent_id, question, options }) => {
+      const id = await ensure();
+      const { askId } = await ops.peerAsk(id, agent_id, question, options);
+      for (;;) {
+        const ask = await ops.waitAsk(askId, 25000);
+        if (ask.status === 'answered') {
+          return { content: [{ type: 'text', text: ask.answer ?? '' }] };
+        }
+        if (ask.status === 'cancelled') {
+          return {
+            content: [
+              { type: 'text', text: '(The other agent dismissed this question without answering.)' },
+            ],
+          };
+        }
+        // still pending — loop and wait again
+      }
+    },
+  );
+
+  server.registerTool(
+    'answer_agent',
+    {
+      title: 'Answer a question another agent asked you',
+      description:
+        'Reply to a peer question that showed up in your inbox. Use the ask_id from that inbox ' +
+        'entry. This unblocks the agent that asked.',
+      inputSchema: {
+        ask_id: z.string().describe('The ask_id from the inbox question'),
+        answer: z.string().describe('Your answer to the other agent'),
+      },
+    },
+    async ({ ask_id, answer }) => {
+      const id = await ensure();
+      await ops.peerReply(id, ask_id, answer);
+      return { content: [{ type: 'text', text: 'Answered.' }] };
+    },
+  );
+}
+
+/**
+ * Render one inbox entry. Peer messages are annotated so the recipient knows who
+ * sent it and whether it is a question to answer (and with which ask_id); human
+ * chat keeps the original plain bullet form.
+ */
+function renderInboxLine(m: {
+  text: string;
+  kind?: string;
+  fromSessionId?: string | null;
+  askId?: string | null;
+}): string {
+  if (m.kind === 'peer' && m.askId) {
+    return `[QUESTION from agent ${m.fromSessionId}] ${m.text}  (reply with answer_agent ask_id=${m.askId})`;
+  }
+  if (m.kind === 'peer') {
+    return `[from agent ${m.fromSessionId}] ${m.text}`;
+  }
+  return `- ${m.text}`;
 }
 
 /**
@@ -229,10 +361,46 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
       await api(`/api/sessions/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) });
     },
     async inbox(id, after) {
-      const { messages } = await api<{ messages: { text: string; createdAt: number }[] }>(
-        `/api/sessions/${id}/inbox?after=${after}`,
-      );
+      const { messages } = await api<{
+        messages: {
+          text: string;
+          createdAt: number;
+          kind?: string;
+          fromSessionId?: string | null;
+          askId?: string | null;
+        }[];
+      }>(`/api/sessions/${id}/inbox?after=${after}`);
       return messages;
+    },
+    async listAgents() {
+      const { agents } = await api<{
+        agents: { id: string; task: string; status: string; runtime: string }[];
+      }>('/api/agents');
+      return agents.map((a) => ({
+        id: a.id,
+        task: a.task,
+        status: a.status,
+        runtime: a.runtime,
+      }));
+    },
+    async peerNotify(fromId, targetId, text) {
+      await api(`/api/sessions/${fromId}/peer-notify`, {
+        method: 'POST',
+        body: JSON.stringify({ targetId, text }),
+      });
+    },
+    async peerAsk(fromId, targetId, question, options) {
+      const { askId } = await api<{ askId: string }>(`/api/sessions/${fromId}/peer-ask`, {
+        method: 'POST',
+        body: JSON.stringify({ targetId, question, options }),
+      });
+      return { askId };
+    },
+    async peerReply(answererId, askId, text) {
+      await api(`/api/sessions/${answererId}/peer-reply`, {
+        method: 'POST',
+        body: JSON.stringify({ askId, text }),
+      });
     },
   };
 }
