@@ -21,14 +21,21 @@ export function isOnline(s: { lastSeenAt: number | null }, nowMs = Date.now()): 
 // argv WITHOUT the prompt — the prompt is written to the child's stdin, so a
 // hostile message can never break out onto the command line. Returns null when
 // we don't know how to start this runtime.
-function startArgv(runtime: string, permissionMode: string): string[] | null {
+function startArgv(
+  runtime: string,
+  permissionMode: string,
+  nativeSessionId: string | null,
+): string[] | null {
   const override = process.env.BEACON_WAKE_CMD;
   if (override && override.trim()) return override.trim().split(/\s+/);
   switch (runtime) {
     case 'claude-code':
-      // Resume the most recent conversation in the work dir (reuses its full
-      // context/task), one print turn, under the chosen permission mode.
-      return ['claude', '--continue', '--print', '--permission-mode', permissionMode];
+      // Prefer resuming the EXACT conversation (platform-resolved native id);
+      // fall back to the most recent one in the work dir. One print turn, under
+      // the chosen permission mode.
+      return nativeSessionId
+        ? ['claude', '--resume', nativeSessionId, '--print', '--permission-mode', permissionMode]
+        : ['claude', '--continue', '--print', '--permission-mode', permissionMode];
     default:
       return null;
   }
@@ -68,7 +75,7 @@ export function startAgent(
   permissionMode: string,
 ): StartResult {
   if (!session.workPath) return 'no-workpath';
-  const argv = startArgv(session.runtime, permissionMode);
+  const argv = startArgv(session.runtime, permissionMode, session.nativeSessionId);
   if (!argv) return 'no-runtime-support';
 
   const prev = lastStart.get(session.id) ?? 0;
@@ -123,5 +130,5 @@ export function startAgent(
 
 /** Can Beacon relaunch this runtime at all? (drives whether the UI offers it) */
 export function canStart(runtime: string): boolean {
-  return !!startArgv(runtime, 'default');
+  return !!startArgv(runtime, 'default', null);
 }

@@ -262,6 +262,12 @@ const updateSessionArchived = db.prepare(
 const updateSessionDescription = db.prepare(
   `UPDATE sessions SET description = @description WHERE id = @id`
 );
+const updateNativeSessionId = db.prepare(
+  `UPDATE sessions SET nativeSessionId = @nativeSessionId WHERE id = @id`
+);
+const selectSessionByNativeId = db.prepare(
+  `SELECT * FROM sessions WHERE nativeSessionId = ? ORDER BY updatedAt DESC LIMIT 1`
+);
 const touchSession = db.prepare(
   `UPDATE sessions SET updatedAt = @updatedAt WHERE id = @id`
 );
@@ -305,6 +311,27 @@ export function createSession(input: {
 export function getSession(id: string): Session | undefined {
   const r = selectSession.get(id) as SessionRow | undefined;
   return r ? mapSession(r) : undefined;
+}
+
+export function getSessionByNativeId(nativeSessionId: string): Session | undefined {
+  if (!nativeSessionId) return undefined;
+  const r = selectSessionByNativeId.get(nativeSessionId) as SessionRow | undefined;
+  return r ? mapSession(r) : undefined;
+}
+
+/**
+ * Stamp the runtime's native session id, resolved objectively by the platform
+ * (from on-disk transcripts), not self-reported by the agent. No-op when unchanged.
+ */
+export function setNativeSessionId(id: string, nativeSessionId: string | null): Session | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  const clean = nativeSessionId && nativeSessionId.trim() ? nativeSessionId.trim() : null;
+  if (clean === s.nativeSessionId) return s;
+  updateNativeSessionId.run({ id, nativeSessionId: clean });
+  const updated = getSession(id)!;
+  bus.emit('session', updated);
+  return updated;
 }
 
 export function listSessions(): Session[] {

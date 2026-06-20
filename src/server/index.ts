@@ -18,6 +18,7 @@ import { SESSION_STATUSES, TRUST_TIERS } from '../core/types';
 import { mountMcpHttp } from './mcp-http';
 import { mountPtyWs, hasLivePty, writeToPty } from './pty';
 import { startAgent, isOnline } from './wake';
+import { resolveActiveSessionId } from './agent-sessions';
 import { getSettings, setSettings } from '../core/settings';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -88,7 +89,7 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
   }
   // Identity Phase 1: optional bindKey (continuation), name (display title) and
   // origin ('agent'|'human'; anything else falls back to 'agent').
-  const session = store.registerOrClaim({
+  let session = store.registerOrClaim({
     runtime: String(runtime),
     workPath: String(workPath ?? ''),
     task: String(task),
@@ -98,6 +99,14 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
     name: name != null ? String(name) : null,
     description: description != null ? String(description) : null,
   });
+  // The native session id is objective on-disk truth, so the PLATFORM resolves it
+  // from the runtime's transcripts (by work path) rather than trusting the agent.
+  // The self-reported value is only a fallback for agents whose disk the platform
+  // can't see (e.g. a remote agent reaching a hosted platform).
+  const resolved =
+    resolveActiveSessionId(session.workPath, session.runtime) ??
+    (nativeSessionId != null ? String(nativeSessionId) : null);
+  if (resolved) session = store.setNativeSessionId(session.id, resolved) ?? session;
   ok(res, { session, agentId: session.id });
 });
 

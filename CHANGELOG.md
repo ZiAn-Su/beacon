@@ -3,6 +3,21 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.6] - 2026-06-20
+
+### 改进 —— 会话 ID 由平台客观解析(不靠智能体上报)
+
+会话 id 是客观事实,不该由 agent 自报。平台改为**自己从磁盘获取**:
+
+- 新增 `src/server/agent-sessions.ts`:按 workPath 解析 Claude Code 的会话目录
+  (`~/.claude/projects/<编码后的 workPath>/*.jsonl`),取最近修改的那段 transcript 即为该 agent 的
+  真实 `nativeSessionId`(文件名即 id)。register 时由平台落库;agent 经 `CLAUDE_CODE_SESSION_ID`
+  自报的值降级为**兜底**(仅当平台看不到 agent 磁盘,如远端 agent)。
+- 精确恢复推广到 wake 与终端面板:有原生 id 时用 `claude --resume <id>`,否则 `--continue`。
+- 资料页会话 ID 行的占位由「智能体未上报」改为中性的「无(尚无运行时会话)」—— 没有底层运行时会话的
+  联系人(如人工占位)本就没有,而非「未上报」。
+- 实测:在本仓库目录注册、**不**带任何 id,平台解析出当前活跃 transcript 的 id;无 transcript 的目录退回兜底值。
+
 ## [0.6.5] - 2026-06-20
 
 ### 改进 —— 名片可随时改、资料页分区收拾干净、session id 常驻

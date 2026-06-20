@@ -118,13 +118,17 @@ export function writeToPty(sessionId: string, text: string): boolean {
   return true;
 }
 
-function spawnTarget(runtime: string): SpawnTarget {
+function spawnTarget(runtime: string, nativeSessionId: string | null): SpawnTarget {
   const wrap = (cmd: string): SpawnTarget =>
     isWin
       ? { file: 'cmd.exe', args: ['/k', cmd] }
       : { file: process.env.SHELL ?? 'bash', args: ['-c', `exec ${cmd}`] };
 
-  if (runtime === 'claude-code' || runtime === 'claude') return wrap('claude --continue');
+  if (runtime === 'claude-code' || runtime === 'claude') {
+    // Resume the EXACT conversation when the platform knows its native id;
+    // otherwise the most recent one in the work dir.
+    return wrap(nativeSessionId ? `claude --resume ${nativeSessionId}` : 'claude --continue');
+  }
   if (runtime === 'codex') return wrap('codex');
 
   // Unknown runtime: open an interactive shell in workPath
@@ -140,7 +144,7 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
   const session = store.getSession(sessionId);
   if (!session) return { error: 'Session not found' };
 
-  const { file, args } = spawnTarget(session.runtime);
+  const { file, args } = spawnTarget(session.runtime, session.nativeSessionId);
   const cols = 120;
   const rows = 30;
 
