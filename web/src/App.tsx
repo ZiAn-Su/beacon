@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Bell, BellOff, Moon, Sun, X } from "lucide-react";
 import { Rail } from "./components/Rail";
 import { ContactList } from "./components/ContactList";
+import { ContactsView } from "./components/ContactsView";
 import { Conversation } from "./components/Conversation";
 import { SessionInfo } from "./components/SessionInfo";
 import { EmptyState } from "./components/EmptyState";
@@ -44,6 +45,8 @@ function Shell() {
   } = useStore();
   const { t } = useI18n();
   const [theme, setTheme] = useState<Theme>(() => readInitialTheme());
+  const [view, setView] = useState<"chats" | "contacts">("chats");
+  const [contactId, setContactId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"contacts" | "conversation">(
     "contacts",
   );
@@ -190,6 +193,9 @@ function Shell() {
         notifPermission={notif.permission}
         onRequestNotifications={notif.requestPermission}
         onOpenSettings={() => setSettingsOpen(true)}
+        view={view}
+        onChangeView={setView}
+        unread={totalUnread}
       />
 
       {/* Mobile-only theme + notif toggles in the header. */}
@@ -237,61 +243,76 @@ function Shell() {
         </button>
       </div>
 
-      {/* Left column: Contact list (264px on >=md, full-screen on mobile). */}
-      <div
-        className={
-          "flex h-full min-w-0 flex-1 " +
-          (mobileView === "contacts" ? "block" : "hidden") +
-          " md:block md:w-[264px] md:shrink-0 md:border-r"
-        }
-        style={{ borderColor: "var(--border)" }}
-      >
-        <ContactList
-          sessions={sessions}
-          messagesBySession={messagesBySession}
-          selectedId={selectedId}
-          onSelect={(id) => setSelectedId(id)}
-          onConnectAgent={() => setConnectOpen(true)}
-          onOpenDirectory={() => setDirectoryOpen(true)}
-        />
-      </div>
-
-      {/* Center column: Conversation (always visible at >=md; full-screen on mobile when selected). */}
-      <div
-        className={
-          "min-w-0 flex-1 " +
-          (mobileView === "conversation" ? "flex" : "hidden") +
-          " md:flex"
-        }
-      >
-        {selected ? (
-          <Conversation
-            session={selected}
-            now={now}
-            onBack={() => setMobileView("contacts")}
-            showBack
-            infoOpen={infoOpen}
-            onToggleInfo={() => setInfoOpen((v) => !v)}
-            canToggleInfo
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center">
-            <EmptyState
-              title={t("app.pick.title")}
-              description={t("app.pick.desc")}
+      {view === "chats" ? (
+        <>
+          {/* Left column: Contact list (264px on >=md, full-screen on mobile). */}
+          <div
+            className={
+              "flex h-full min-w-0 flex-1 " +
+              (mobileView === "contacts" ? "block" : "hidden") +
+              " md:block md:w-[264px] md:shrink-0 md:border-r"
+            }
+            style={{ borderColor: "var(--border)" }}
+          >
+            <ContactList
+              sessions={sessions}
+              messagesBySession={messagesBySession}
+              selectedId={selectedId}
+              onSelect={(id) => setSelectedId(id)}
+              onConnectAgent={() => setConnectOpen(true)}
             />
           </div>
-        )}
-      </div>
 
-      {/* Right column: SessionInfo (280px on >=lg; toggleable on >=md/<lg; hidden <md). */}
-      {selected && infoOpen && (
-        <div
-          className="hidden md:block md:w-[280px] md:shrink-0 md:border-l"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <SessionInfo session={selected} now={now} />
-        </div>
+          {/* Center column: Conversation (always visible at >=md; full-screen on mobile when selected). */}
+          <div
+            className={
+              "min-w-0 flex-1 " +
+              (mobileView === "conversation" ? "flex" : "hidden") +
+              " md:flex"
+            }
+          >
+            {selected ? (
+              <Conversation
+                session={selected}
+                now={now}
+                onBack={() => setMobileView("contacts")}
+                showBack
+                infoOpen={infoOpen}
+                onToggleInfo={() => setInfoOpen((v) => !v)}
+                canToggleInfo
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <EmptyState
+                  title={t("app.pick.title")}
+                  description={t("app.pick.desc")}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Right column: SessionInfo (280px on >=lg; toggleable on >=md/<lg; hidden <md). */}
+          {selected && infoOpen && (
+            <div
+              className="hidden md:block md:w-[280px] md:shrink-0 md:border-l"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <SessionInfo session={selected} now={now} />
+            </div>
+          )}
+        </>
+      ) : (
+        <ContactsView
+          sessions={sessions}
+          selectedId={contactId}
+          onSelect={setContactId}
+          onMessage={(id) => {
+            setSelectedId(id);
+            setView("chats");
+            setMobileView("conversation");
+          }}
+          onOpenManage={() => setDirectoryOpen(true)}
+        />
       )}
 
       {notif.shouldPrompt && (

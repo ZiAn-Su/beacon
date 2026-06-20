@@ -21,6 +21,9 @@ export interface Session {
   // Authorization graduation for this agent's outbound peer messaging.
   // Optional for forward-compat with older payloads; defaults to "standard".
   trustTier?: TrustTier;
+  // Who brought this contact into being: a self-registering agent, or a human.
+  // Optional for forward-compat; defaults to "agent".
+  origin?: "agent" | "human";
   createdAt: number;
   updatedAt: number;
 }

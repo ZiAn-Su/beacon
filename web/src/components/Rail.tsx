@@ -1,5 +1,7 @@
-import { Bell, BellOff, Languages, Moon, Settings, Sun } from "lucide-react";
+import { Bell, BellOff, BookUser, Languages, MessageSquare, Moon, Settings, Sun } from "lucide-react";
 import { useI18n } from "../lib/i18n";
+
+type View = "chats" | "contacts";
 
 interface Props {
   theme: "dark" | "light";
@@ -7,6 +9,10 @@ interface Props {
   notifPermission: "default" | "granted" | "denied" | "unsupported";
   onRequestNotifications: () => Promise<unknown>;
   onOpenSettings: () => void;
+  view: View;
+  onChangeView: (v: View) => void;
+  /** Total unread, shown as a dot on the Chats nav icon. */
+  unread?: number;
 }
 
 export function Rail({
@@ -15,6 +21,9 @@ export function Rail({
   notifPermission,
   onRequestNotifications,
   onOpenSettings,
+  view,
+  onChangeView,
+  unread = 0,
 }: Props) {
   const { t, lang, toggleLang } = useI18n();
   return (
@@ -24,6 +33,21 @@ export function Rail({
     >
       <div className="flex flex-col items-center gap-3">
         <BrandMark />
+        <NavButton
+          active={view === "chats"}
+          onClick={() => onChangeView("chats")}
+          label={t("nav.chats")}
+          badge={unread > 0}
+        >
+          <MessageSquare size={18} />
+        </NavButton>
+        <NavButton
+          active={view === "contacts"}
+          onClick={() => onChangeView("contacts")}
+          label={t("nav.contacts")}
+        >
+          <BookUser size={18} />
+        </NavButton>
         {notifPermission !== "unsupported" && (
           <button
             onClick={() => void onRequestNotifications()}
@@ -136,6 +160,50 @@ export function Rail({
         </button>
       </div>
     </aside>
+  );
+}
+
+function NavButton({
+  active,
+  onClick,
+  label,
+  badge,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  badge?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-pressed={active}
+      className="relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors duration-150"
+      style={{
+        color: active ? "var(--accent)" : "var(--text-secondary)",
+        background: active ? "var(--accent-soft)" : "transparent",
+        border: "1px solid transparent",
+      }}
+      onMouseEnter={(e) => {
+        if (!active) e.currentTarget.style.background = "var(--surface-hover)";
+      }}
+      onMouseLeave={(e) => {
+        if (!active) e.currentTarget.style.background = "transparent";
+      }}
+    >
+      {children}
+      {badge && (
+        <span
+          className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full"
+          style={{ background: "var(--accent)", boxShadow: "0 0 0 2px var(--bg)" }}
+          aria-hidden
+        />
+      )}
+    </button>
   );
 }
 
