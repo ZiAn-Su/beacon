@@ -16,8 +16,11 @@ import type {
   AskStatus,
   Owner,
   TrustTier,
+  Grant,
+  GrantEffect,
 } from './types';
-import { SESSION_STATUSES } from './types';
+import { SESSION_STATUSES, TRUST_TIERS } from './types';
+import { getSettings } from './settings';
 
 const DB_PATH = process.env.BEACON_DB ?? 'data/beacon.db';
 mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -64,6 +67,14 @@ CREATE TABLE IF NOT EXISTS owner (
   token TEXT,
   createdAt INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS grants (
+  id TEXT PRIMARY KEY,
+  fromId TEXT NOT NULL,
+  toId TEXT NOT NULL,
+  effect TEXT NOT NULL,
+  createdAt INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_grants_pair ON grants(fromId, toId);
 `);
 
 // Additive migrations: bring older databases (created before a column existed)
@@ -330,6 +341,24 @@ export function setArchived(id: string, archived: boolean): Session | undefined 
   const s = getSession(id);
   if (!s) return undefined;
   updateSessionArchived.run({ id, archivedAt: archived ? now() : null });
+  const updated = getSession(id)!;
+  bus.emit('session', updated);
+  return updated;
+}
+
+const updateSessionTrustTier = db.prepare(
+  `UPDATE sessions SET trustTier = @trustTier, updatedAt = @updatedAt WHERE id = @id`
+);
+
+/**
+ * Set a session's trust tier (authorization graduation). Rejects an unknown
+ * tier by returning the session unchanged. Emits a session event on success.
+ */
+export function setTrustTier(id: string, tier: string): Session | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  if (!(TRUST_TIERS as string[]).includes(tier)) return s;
+  updateSessionTrustTier.run({ id, trustTier: tier, updatedAt: now() });
   const updated = getSession(id)!;
   bus.emit('session', updated);
   return updated;
@@ -650,4 +679,67 @@ export function agentAnswer(
   if (session && session.status === 'waiting') setStatus(askerId, 'working');
   flushWaiters(getAsk(askId)!);
   return getAsk(askId);
+}
+
+// ---------- grants (per-pair authorization) ----------
+// A grant is an explicit allow/deny on a single (fromId -> toId) edge. It
+// overrides the sender's trust tier in resolvePeerPermission. At most one grant
+// per pair: setGrant updates an existing row rather than inserting a duplicate.
+const insertGrant = db.prepare(
+  `INSERT INTO grants (id, fromId, toId, effect, createdAt)
+   VALUES (@id, @fromId, @toId, @effect, @createdAt)`
+);
+const updateGrantEffect = db.prepare(
+  `UPDATE grants SET effect = @effect WHERE id = @id`
+);
+const deleteGrant = db.prepare(`DELETE FROM grants WHERE id = ?`);
+const selectGrants = db.prepare(`SELECT * FROM grants ORDER BY createdAt ASC`);
+const selectGrantByPair = db.prepare(
+  `SELECT * FROM grants WHERE fromId = ? AND toId = ? LIMIT 1`
+);
+
+/** Upsert the grant for a pair: update its effect if one exists, else insert. */
+export function setGrant(fromId: string, toId: string, effect: GrantEffect): Grant {
+  const existing = selectGrantByPair.get(fromId, toId) as Grant | undefined;
+  if (existing) {
+    updateGrantEffect.run({ id: existing.id, effect });
+    return { ...existing, effect };
+  }
+  const grant: Grant = {
+    id: randomUUID(),
+    fromId,
+    toId,
+    effect,
+    createdAt: now(),
+  };
+  insertGrant.run(grant);
+  return grant;
+}
+
+export function removeGrant(id: string): void {
+  deleteGrant.run(id);
+}
+
+export function listGrants(): Grant[] {
+  return selectGrants.all() as Grant[];
+}
+
+export function getGrantForPair(fromId: string, toId: string): Grant | undefined {
+  return selectGrantByPair.get(fromId, toId) as Grant | undefined;
+}
+
+/**
+ * Decide whether `fromId` may initiate peer messaging to `toId`. Most-specific
+ * wins, pure (no side effects):
+ *   1. global master switch off -> deny (highest priority).
+ *   2. an exact-pair grant -> its effect.
+ *   3. else the sender's trust tier: 'restricted' -> deny, otherwise allow.
+ */
+export function resolvePeerPermission(fromId: string, toId: string): 'allow' | 'deny' {
+  if (getSettings().agentComm === 'off') return 'deny';
+  const grant = getGrantForPair(fromId, toId);
+  if (grant) return grant.effect;
+  const from = getSession(fromId);
+  const tier = from?.trustTier ?? 'standard';
+  return tier === 'restricted' ? 'deny' : 'allow';
 }

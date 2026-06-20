@@ -79,6 +79,18 @@ export interface Message {
   deliveredAt: number | null; // when agent first read it via check_inbox
 }
 
+// A per-pair authorization grant overriding the sender's trust tier for a
+// specific (fromId -> toId) edge. 'allow' opens the edge; 'deny' closes it.
+export type GrantEffect = 'allow' | 'deny';
+
+export interface Grant {
+  id: string;
+  fromId: string;
+  toId: string;
+  effect: GrantEffect;
+  createdAt: number;
+}
+
 export type AskStatus = 'pending' | 'answered' | 'cancelled';
 
 export interface Ask {

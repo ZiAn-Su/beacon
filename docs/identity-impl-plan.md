@@ -276,3 +276,77 @@ inbox(id, after): Promise<{ text; createdAt; kind?: string; fromSessionId?: stri
 
 - 不动 `src/core/**`、`src/server/index.ts`(后端已完成且冻结)、`web/**`、README、`company/**`、设计文档。
 - 不删除/重命名任何现有工具或导出。不改 5 个原工具的对外 schema。
+
+---
+
+## Phase 4 规格(授权 · 切片 1:信任档位 + 逐对 Grant)—— 本次实现
+
+> 把 agent↔agent 的"全局 on/off"升级为**真授权**:每个 agent 的**信任档位** + **逐对放行/拒绝**。
+> 本切片**不做审批队列/held 消息/approve-once-or-always**(那是切片 2,delicate,作者主导)。约定同前。
+> **本切片只做后端**(core + gateway),不做 UI。
+
+### 可触文件(仅此三个)
+- `src/core/types.ts` —— 新增 `Grant` 接口、`GrantEffect` 类型。
+- `src/core/store.ts` —— `grants` 表 + `setGrant`/`removeGrant`/`listGrants`/`getGrant` + **`resolvePeerPermission(fromId,toId)`**。
+- `src/server/index.ts` —— grants 的 CRUD 端点;peer-notify/peer-ask 接入 `resolvePeerPermission`;PATCH 会话支持 `trustTier`。
+
+### A. 裁决语义(`resolvePeerPermission(fromId, toId): 'allow' | 'deny'`)
+
+按优先级(最具体者胜),纯函数,无副作用:
+1. 全局总闸:`getSettings().agentComm === 'off'` → **deny**(master switch,最高优先)。
+2. 逐对 Grant:存在 `(fromId → toId)` 的 Grant → 用其 `effect`('allow'|'deny')。
+3. 回落发起方信任档位(P1 已存 `trustTier`,读时默认 'standard'):
+   - `'restricted'` → **deny**
+   - `'standard'` / `'trusted'` / `'autonomous'` → **allow**
+- 设计原则:默认(standard)放行,单用户同一监护人下 agent 可互通;把某 agent 降到 `restricted` 即锁死其对外发起;逐对 Grant 精确开/关某条边。
+
+### B. 数据模型(`src/core/store.ts`)
+
+```sql
+CREATE TABLE IF NOT EXISTS grants (
+  id TEXT PRIMARY KEY,
+  fromId TEXT NOT NULL,
+  toId TEXT NOT NULL,
+  effect TEXT NOT NULL,          -- 'allow' | 'deny'
+  createdAt INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_grants_pair ON grants(fromId, toId);
+```
+- `setGrant(fromId,toId,effect)`:同一 (fromId,toId) 已存在则更新 effect,否则插入;返回 Grant。
+- `removeGrant(id)`;`listGrants(): Grant[]`;`getGrantForPair(fromId,toId): Grant | undefined`。
+- `resolvePeerPermission` 用 `getGrantForPair` + `getSession(fromId).trustTier` + `getSettings().agentComm`。
+- 新增 `setTrustTier(id, tier)`:校验 tier ∈ TRUST_TIERS,`UPDATE sessions SET trustTier=...`,emit session,返回 session。
+
+### C. 类型(`src/core/types.ts`)
+
+```
+export type GrantEffect = 'allow' | 'deny';
+export interface Grant { id: string; fromId: string; toId: string; effect: GrantEffect; createdAt: number; }
+```
+
+### D. 网关(`src/server/index.ts`)
+
+- 在 `peer-notify` 与 `peer-ask` 里,**把现有 `agentCommOk(res)` 替换/补充为**对 `resolvePeerPermission(fromId,toId)` 的检查:deny → 403 `{error:'not authorized to contact this agent'}`。(全局 off 仍在 resolve 内最高优先。)
+- 北向(人)端点:
+  - `GET /api/grants` → `{ grants: store.listGrants() }`
+  - `POST /api/grants` body `{ fromId, toId, effect }`:校验两 session 存在、effect ∈ {'allow','deny'} → `store.setGrant(...)` → `{ grant }`;否则 400/404。
+  - `DELETE /api/grants/:id` → `store.removeGrant(...)` → `{ ok:true }`。
+- `PATCH /api/sessions/:id`:识别 `trustTier` 字段 → 校验 ∈ TRUST_TIERS → `store.setTrustTier(id, trustTier)`;非法值 400。(保持现有 rename/archive 行为不变。)
+
+### E. 验收(子智能体自测 + 贴证据)
+
+- `npm run typecheck`、`npm run check:encoding` 过;`npm run e2e` 全回归过(human↔agent 零破坏)。
+- 隔离实例手测(贴输出):注册 A、B;
+  1. 默认(standard):A peer-notify B → 200(放行)。
+  2. `PATCH /api/sessions/<A> {trustTier:'restricted'}` → 之后 A peer-notify B → **403**。
+  3. `POST /api/grants {fromId:A,toId:B,effect:'allow'}` → 即便 A 仍 restricted,A peer-notify B → **200**(逐对 Grant 覆盖档位)。
+  4. `POST /api/grants {... effect:'deny'}`(改该对为 deny)→ A peer-notify B → **403**。
+  5. `GET /api/grants` 含该对;`DELETE /api/grants/<id>` 后回落档位(A 仍 restricted → 403)。
+- 清理隔离实例与临时库。
+
+### F. 明确不做(切片 2 再做)
+
+- 不做审批队列 / held 消息 / approve-once|task|always / 作用域 scope / ingress-egress 跨监护人。
+- 不做 UI(权限面板、信任档位控件)——后续 UI 子任务。
+- 不动 `web/**`、MCP 工具、skill、README、`company/**`、设计文档。
+- 不删改现有导出。grants 只加不改;`agentComm` 全局闸保留。

@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
-import { SESSION_STATUSES } from '../core/types';
+import { SESSION_STATUSES, TRUST_TIERS } from '../core/types';
 import { mountMcpHttp } from './mcp-http';
 import { mountPtyWs, hasLivePty, writeToPty } from './pty';
 import { startAgent, isOnline } from './wake';
@@ -174,11 +174,13 @@ app.get('/api/sessions/:id/inbox', (req: Request, res: Response) => {
 });
 
 // --- agent -> agent (peer) ---
-// Minimal authorization gate: a single global switch (single guardian, no
-// per-grant scope yet). When 'off', peer messaging is refused.
-function agentCommOk(res: Response): boolean {
-  if (getSettings().agentComm === 'off') {
-    res.status(403).json({ error: 'agent-to-agent messaging disabled' });
+// Per-pair authorization: resolvePeerPermission folds the global master switch
+// (agentComm 'off'), any exact-pair grant, and the sender's trust tier into a
+// single allow/deny (most-specific wins). Call after both sessions are known to
+// exist. Deny -> 403.
+function peerAuthOk(res: Response, fromId: string, toId: string): boolean {
+  if (store.resolvePeerPermission(fromId, toId) === 'deny') {
+    res.status(403).json({ error: 'not authorized to contact this agent' });
     return false;
   }
   return true;
@@ -187,12 +189,12 @@ function agentCommOk(res: Response): boolean {
 // Non-blocking agent->agent FYI. body { targetId, text }.
 app.post('/api/sessions/:id/peer-notify', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
-  if (!agentCommOk(res)) return;
   const targetId = String(req.body?.targetId ?? '');
   const text = String(req.body?.text ?? '');
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
   if (!store.getSession(param(req, 'id'))) return notFound(res);
   if (!store.getSession(targetId)) return notFound(res);
+  if (!peerAuthOk(res, param(req, 'id'), targetId)) return;
   store.touchSeen(param(req, 'id'));
   try {
     const message = store.peerNotify(param(req, 'id'), targetId, text);
@@ -206,13 +208,13 @@ app.post('/api/sessions/:id/peer-notify', (req: Request, res: Response) => {
 // asker then long-polls the EXISTING GET /api/asks/:askId/wait endpoint.
 app.post('/api/sessions/:id/peer-ask', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
-  if (!agentCommOk(res)) return;
   const targetId = String(req.body?.targetId ?? '');
   if (!String(req.body?.question ?? '').trim()) {
     res.status(400).json({ error: 'question is required' }); return;
   }
   if (!store.getSession(param(req, 'id'))) return notFound(res);
   if (!store.getSession(targetId)) return notFound(res);
+  if (!peerAuthOk(res, param(req, 'id'), targetId)) return;
   store.touchSeen(param(req, 'id'));
   const options = Array.isArray(req.body?.options)
     ? req.body.options.map(String)
@@ -251,6 +253,32 @@ app.get('/api/sessions', (_req: Request, res: Response) => {
 // guardianId / trustTier / origin / bindKey. No scope filtering yet.
 app.get('/api/agents', (_req: Request, res: Response) => {
   ok(res, { agents: store.listSessions() });
+});
+
+// --- per-pair authorization grants (north / human side) ---
+const VALID_GRANT_EFFECT = ['allow', 'deny'] as const;
+
+app.get('/api/grants', (_req: Request, res: Response) => {
+  ok(res, { grants: store.listGrants() });
+});
+
+app.post('/api/grants', (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const fromId = String(body.fromId ?? '');
+  const toId = String(body.toId ?? '');
+  const effect = String(body.effect ?? '');
+  if (!(VALID_GRANT_EFFECT as readonly string[]).includes(effect)) {
+    res.status(400).json({ error: `invalid effect; must be one of: ${VALID_GRANT_EFFECT.join(', ')}` }); return;
+  }
+  if (!store.getSession(fromId)) return notFound(res);
+  if (!store.getSession(toId)) return notFound(res);
+  const grant = store.setGrant(fromId, toId, effect as 'allow' | 'deny');
+  ok(res, { grant });
+});
+
+app.delete('/api/grants/:id', (req: Request, res: Response) => {
+  store.removeGrant(param(req, 'id'));
+  ok(res, { ok: true });
 });
 
 app.get('/api/sessions/:id', (req: Request, res: Response) => {
@@ -355,8 +383,12 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   if (!store.getSession(id)) return notFound(res);
   // ISS-008: 400 if no recognised fields provided (hides misspelled field names)
   const body = req.body ?? {};
-  if (!('title' in body) && typeof body.archived !== 'boolean') {
-    res.status(400).json({ error: 'no patchable fields in body; expected title or archived' }); return;
+  if (!('title' in body) && typeof body.archived !== 'boolean' && !('trustTier' in body)) {
+    res.status(400).json({ error: 'no patchable fields in body; expected title, archived or trustTier' }); return;
+  }
+  // Validate trustTier up front so an invalid value is a 400, not a silent no-op.
+  if ('trustTier' in body && !(TRUST_TIERS as readonly string[]).includes(String(body.trustTier))) {
+    res.status(400).json({ error: `invalid trustTier; must be one of: ${TRUST_TIERS.join(', ')}` }); return;
   }
   let session = store.getSession(id)!;
   if ('title' in (req.body ?? {})) {
@@ -365,6 +397,9 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   }
   if (typeof req.body?.archived === 'boolean') {
     session = store.setArchived(id, req.body.archived) ?? session;
+  }
+  if ('trustTier' in body) {
+    session = store.setTrustTier(id, String(body.trustTier)) ?? session;
   }
   ok(res, { session });
 });
