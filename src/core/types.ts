@@ -44,7 +44,10 @@ export interface Session {
   workPath: string; // working directory / task root
   task: string; // human-readable description of what it's doing
   status: SessionStatus;
-  title: string | null; // human-set display name; overrides `task` when present
+  title: string | null; // display name; agent self-reports it, human can override. Falls back to `task`.
+  // Agent self-introduction: who it is, what it does / is good at. Lets a peer
+  // decide whether to contact it. Agent-reported at register; human-editable.
+  description: string | null;
   archivedAt: number | null; // when archived (hidden from active list), else null
   lastSeenAt: number | null; // last time the agent talked to Beacon (presence)
   bindKey: string | null; // continuation credential; null = anonymous one-shot

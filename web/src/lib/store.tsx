@@ -47,6 +47,7 @@ interface StoreState {
   ) => Promise<AgentDelivery | undefined>;
   cancelAsk: (askId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string | null) => Promise<void>;
+  setSessionDescription: (sessionId: string, description: string | null) => Promise<void>;
   setArchived: (sessionId: string, archived: boolean) => Promise<void>;
   setSessionTrustTier: (sessionId: string, trustTier: string) => Promise<void>;
   startAgent: (sessionId: string, text: string) => Promise<string>;
@@ -322,6 +323,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [upsertSession],
   );
 
+  const setSessionDescription = useCallback(
+    async (sessionId: string, description: string | null) => {
+      const session = await patchSession(sessionId, { description });
+      upsertSession(session);
+    },
+    [upsertSession],
+  );
+
   const setArchived = useCallback(
     async (sessionId: string, archived: boolean) => {
       const session = await patchSession(sessionId, { archived });
@@ -356,6 +365,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       send,
       cancelAsk,
       renameSession,
+      setSessionDescription,
       setArchived,
       setSessionTrustTier,
       startAgent,
@@ -378,6 +388,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       ensureSessionMessages,
       send,
       renameSession,
+      setSessionDescription,
       setArchived,
       setSessionTrustTier,
       startAgent,

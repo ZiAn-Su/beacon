@@ -109,6 +109,8 @@ ensureColumn('sessions', 'origin', 'TEXT');
 ensureColumn('sessions', 'guardianId', 'TEXT');
 ensureColumn('sessions', 'trustTier', 'TEXT');
 ensureColumn('sessions', 'nativeSessionId', 'TEXT');
+// Agent self-introduction (bio). NULL on old rows; defaulted at read time.
+ensureColumn('sessions', 'description', 'TEXT');
 // Identity Phase 3 — agent->agent peer messages. NULL on pre-existing rows and
 // on human/agent messages; only set for kind 'peer'. Defaulted at read time.
 ensureColumn('messages', 'fromSessionId', 'TEXT');
@@ -155,6 +157,7 @@ interface SessionRow {
   task: string;
   status: SessionStatus;
   title: string | null;
+  description: string | null;
   archivedAt: number | null;
   lastSeenAt: number | null;
   bindKey: string | null;
@@ -197,6 +200,7 @@ function mapSession(r: SessionRow): Session {
     task: r.task,
     status: r.status,
     title: r.title ?? null,
+    description: r.description ?? null,
     archivedAt: r.archivedAt ?? null,
     lastSeenAt: r.lastSeenAt ?? null,
     bindKey: r.bindKey ?? null,
@@ -238,8 +242,8 @@ function mapAsk(r: AskRow): Ask {
 
 // ---------- sessions ----------
 const insertSession = db.prepare(
-  `INSERT INTO sessions (id, runtime, workPath, task, status, title, archivedAt, lastSeenAt, bindKey, nativeSessionId, origin, guardianId, trustTier, createdAt, updatedAt)
-   VALUES (@id, @runtime, @workPath, @task, @status, @title, @archivedAt, @lastSeenAt, @bindKey, @nativeSessionId, @origin, @guardianId, @trustTier, @createdAt, @updatedAt)`
+  `INSERT INTO sessions (id, runtime, workPath, task, status, title, description, archivedAt, lastSeenAt, bindKey, nativeSessionId, origin, guardianId, trustTier, createdAt, updatedAt)
+   VALUES (@id, @runtime, @workPath, @task, @status, @title, @description, @archivedAt, @lastSeenAt, @bindKey, @nativeSessionId, @origin, @guardianId, @trustTier, @createdAt, @updatedAt)`
 );
 const selectSession = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
 const selectSessions = db.prepare(`SELECT * FROM sessions ORDER BY updatedAt DESC`);
@@ -255,6 +259,9 @@ const updateSessionTitle = db.prepare(
 const updateSessionArchived = db.prepare(
   `UPDATE sessions SET archivedAt = @archivedAt WHERE id = @id`
 );
+const updateSessionDescription = db.prepare(
+  `UPDATE sessions SET description = @description WHERE id = @id`
+);
 const touchSession = db.prepare(
   `UPDATE sessions SET updatedAt = @updatedAt WHERE id = @id`
 );
@@ -267,9 +274,11 @@ export function createSession(input: {
   nativeSessionId?: string | null;
   origin?: 'agent' | 'human';
   name?: string | null;
+  description?: string | null;
 }): Session {
   const ts = now();
   const title = input.name && input.name.trim() ? input.name.trim() : null;
+  const description = input.description && input.description.trim() ? input.description.trim() : null;
   const s: Session = {
     id: randomUUID(),
     runtime: input.runtime || 'unknown',
@@ -277,6 +286,7 @@ export function createSession(input: {
     task: input.task || '',
     status: 'registered',
     title,
+    description,
     archivedAt: null,
     lastSeenAt: ts,
     bindKey: input.bindKey ?? null,
@@ -314,6 +324,7 @@ export function registerOrClaim(input: {
   nativeSessionId?: string | null;
   origin?: 'agent' | 'human';
   name?: string | null;
+  description?: string | null;
 }): Session {
   const key = input.bindKey && input.bindKey.trim() ? input.bindKey : null;
   if (key) {
@@ -349,6 +360,20 @@ export function renameSession(id: string, title: string | null): Session | undef
   if (!s) return undefined;
   const clean = title && title.trim() ? title.trim() : null;
   updateSessionTitle.run({ id, title: clean });
+  const updated = getSession(id)!;
+  bus.emit('session', updated);
+  return updated;
+}
+
+/**
+ * Human-set self-introduction for an agent. Empty/blank clears it. Does not bump
+ * updatedAt (editing the bio shouldn't reorder the roster).
+ */
+export function setDescription(id: string, description: string | null): Session | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  const clean = description && description.trim() ? description.trim() : null;
+  updateSessionDescription.run({ id, description: clean });
   const updated = getSession(id)!;
   bus.emit('session', updated);
   return updated;

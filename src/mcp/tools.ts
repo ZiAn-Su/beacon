@@ -19,6 +19,8 @@ export interface AgentOps {
     workPath?: string;
     task?: string;
     nativeSessionId?: string | null;
+    name?: string | null;
+    description?: string | null;
   }): Promise<{ id: string }>;
   notify(id: string, text: string): Promise<void>;
   ask(id: string, question: string, options?: string[] | null): Promise<{ askId: string }>;
@@ -36,7 +38,9 @@ export interface AgentOps {
       askId?: string | null;
     }[]
   >;
-  listAgents(forId: string): Promise<{ id: string; task: string; status: string; runtime: string }[]>;
+  listAgents(forId: string): Promise<
+    { id: string; task: string; status: string; runtime: string; name?: string | null; description?: string | null }[]
+  >;
   peerNotify(fromId: string, targetId: string, text: string): Promise<void>;
   peerAsk(
     fromId: string,
@@ -59,6 +63,10 @@ export interface AgentDefaults {
   // The runtime's own session id (e.g. from CLAUDE_CODE_SESSION_ID), reported at
   // register so the human can precisely resume this exact conversation.
   nativeSessionId?: string | null;
+  // Self-introduction defaults (from env): a display name and a short bio so
+  // peers and the human can tell who this agent is.
+  name?: string | null;
+  description?: string | null;
 }
 
 // Guidance returned when a peer message is blocked pending guardian approval.
@@ -93,6 +101,8 @@ export function registerBeaconTools(
       workPath: defaults.workPath,
       task: task ?? defaults.task,
       nativeSessionId: defaults.nativeSessionId ?? null,
+      name: defaults.name ?? null,
+      description: defaults.description ?? null,
     });
     sessionId = id;
     return id;
@@ -111,14 +121,24 @@ export function registerBeaconTools(
         task: z.string().describe('Short description of what you are working on'),
         work_path: z.string().optional().describe('Working directory / task root'),
         runtime: z.string().optional().describe('Agent runtime, e.g. claude-code, codex'),
+        name: z
+          .string()
+          .optional()
+          .describe('Your display name / persona (e.g. "Backend engineer Max"). Stays stable as your task changes.'),
+        about: z
+          .string()
+          .optional()
+          .describe('A one-line self-introduction: your role, skills, what you are good at. Other agents read this to decide whether to contact you.'),
       },
     },
-    async ({ task, work_path, runtime }) => {
+    async ({ task, work_path, runtime, name, about }) => {
       const { id } = await ops.register({
         runtime: runtime ?? defaults.runtime,
         workPath: work_path ?? defaults.workPath,
         task,
         nativeSessionId: defaults.nativeSessionId ?? null,
+        name: name ?? defaults.name ?? null,
+        description: about ?? defaults.description ?? null,
       });
       sessionId = id;
       return {
@@ -233,7 +253,7 @@ export function registerBeaconTools(
       const id = await ensure();
       const agents = (await ops.listAgents(id)).filter((a) => a.id !== id);
       const text = agents.length
-        ? agents.map((a) => `${a.id} — ${a.task} [${a.status}]`).join('\n')
+        ? agents.map(renderAgentLine).join('\n')
         : '(no other agents are visible to you)';
       return { content: [{ type: 'text', text }] };
     },
@@ -379,6 +399,27 @@ export function registerBeaconTools(
 }
 
 /**
+ * Render one discovered agent for list_agents: id, name (when set), current
+ * task, status, and the self-introduction so the reader can decide whether to
+ * reach out before spending an ask.
+ */
+function renderAgentLine(a: {
+  id: string;
+  task: string;
+  status: string;
+  runtime: string;
+  name?: string | null;
+  description?: string | null;
+}): string {
+  const name = a.name && a.name.trim() ? a.name.trim() : null;
+  const head = name ? `${a.id} — ${name} [${a.status}]` : `${a.id} — ${a.task} [${a.status}]`;
+  const lines = [head];
+  if (name && a.task && a.task.trim()) lines.push(`    task: ${a.task.trim()}`);
+  if (a.description && a.description.trim()) lines.push(`    about: ${a.description.trim()}`);
+  return lines.join('\n');
+}
+
+/**
  * Render one inbox entry. Peer messages are annotated so the recipient knows who
  * sent it and whether it is a question to answer (and with which ask_id); human
  * chat keeps the original plain bullet form.
@@ -426,6 +467,8 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
           workPath: input.workPath,
           task: input.task,
           nativeSessionId: input.nativeSessionId ?? null,
+          name: input.name ?? null,
+          description: input.description ?? null,
         }),
       });
       return { id: session.id };
@@ -463,13 +506,22 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
     },
     async listAgents(forId: string) {
       const { agents } = await api<{
-        agents: { id: string; task: string; status: string; runtime: string }[];
+        agents: {
+          id: string;
+          task: string;
+          status: string;
+          runtime: string;
+          title?: string | null;
+          description?: string | null;
+        }[];
       }>(`/api/agents?visibleTo=${encodeURIComponent(forId)}`);
       return agents.map((a) => ({
         id: a.id,
         task: a.task,
         status: a.status,
         runtime: a.runtime,
+        name: a.title ?? null,
+        description: a.description ?? null,
       }));
     },
     async peerNotify(fromId, targetId, text) {

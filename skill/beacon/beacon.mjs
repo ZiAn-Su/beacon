@@ -33,6 +33,9 @@ const NATIVE_SESSION_ID =
   process.env.CLAUDE_CODE_SESSION_ID ??
   process.env.CODEX_SESSION_ID ??
   null;
+// Optional self-introduction so the human/peers can tell who this agent is.
+const AGENT_NAME = process.env.AGENT_NAME ?? null;
+const AGENT_ABOUT = process.env.AGENT_ABOUT ?? process.env.AGENT_DESCRIPTION ?? null;
 // When the platform relaunches an offline agent, it injects this so the skill
 // attaches to the original conversation instead of registering a new one.
 const INJECTED_SESSION = process.env.BEACON_SESSION_ID ?? '';
@@ -77,6 +80,8 @@ async function register(task) {
     workPath: WORK,
     task: task || process.env.AGENT_TASK || '',
     nativeSessionId: NATIVE_SESSION_ID,
+    name: AGENT_NAME,
+    description: AGENT_ABOUT,
   });
   saveCache({ sessionId: session.id, lastInboxTs: 0 });
   return session.id;
@@ -131,9 +136,17 @@ try {
     console.log(messages.length ? messages.map(renderInboxLine).join('\n') : '(no new messages from the human)');
   } else if (cmd === 'agents') {
     const id = await ensureSession();
-    const { agents } = await api('/api/agents');
+    const { agents } = await api(`/api/agents?visibleTo=${encodeURIComponent(id)}`);
     const others = agents.filter((a) => a.id !== id);
-    console.log(others.length ? others.map((a) => `${a.id} — ${a.task} [${a.status}]`).join('\n') : '(no other agents are registered)');
+    const renderAgent = (a) => {
+      const name = a.title && a.title.trim() ? a.title.trim() : null;
+      const head = name ? `${a.id} — ${name} [${a.status}]` : `${a.id} — ${a.task} [${a.status}]`;
+      const lines = [head];
+      if (name && a.task && a.task.trim()) lines.push(`    task: ${a.task.trim()}`);
+      if (a.description && a.description.trim()) lines.push(`    about: ${a.description.trim()}`);
+      return lines.join('\n');
+    };
+    console.log(others.length ? others.map(renderAgent).join('\n') : '(no other agents are visible to you)');
   } else if (cmd === 'notify-agent') {
     const id = await ensureSession();
     const targetId = args[0] ?? '';

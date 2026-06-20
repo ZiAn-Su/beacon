@@ -158,7 +158,7 @@ export async function cancelAsk(askId: string): Promise<void> {
 /** Rename and/or archive a conversation (PATCH /api/sessions/:id). */
 export async function patchSession(
   sessionId: string,
-  body: { title?: string | null; archived?: boolean; trustTier?: string },
+  body: { title?: string | null; description?: string | null; archived?: boolean; trustTier?: string },
 ): Promise<Session> {
   const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
     method: "PATCH",

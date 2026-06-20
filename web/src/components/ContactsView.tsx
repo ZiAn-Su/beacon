@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { BookUser, MessageSquare, Search, Trash2, User } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookUser, Check, Copy, MessageSquare, Pencil, Search, Trash2, User, X } from "lucide-react";
 import type { Session, TrustTier } from "../types";
 import {
   createGrant,
@@ -243,11 +243,15 @@ function ContactProfile({
   sessions: Session[];
 }) {
   const { t } = useI18n();
-  const { setSessionTrustTier } = useStore();
+  const { setSessionTrustTier, renameSession, setSessionDescription } = useStore();
   const label = pathBase(session.workPath) || session.runtime;
   const title = sessionName(session, label);
   const online = isOnline(session, Date.now());
   const tier = session.trustTier ?? "standard";
+  // Show the current task as a subtitle only when a distinct display name exists
+  // (otherwise the name already *is* the task and we'd print it twice).
+  const taskLine = session.task?.trim();
+  const showTask = !!taskLine && taskLine !== title;
 
   const [grants, setGrants] = useState<Grant[]>([]);
   const [requests, setRequests] = useState<ContactRequest[]>([]);
@@ -296,13 +300,23 @@ function ContactProfile({
       <div className="scroll-area flex-1 overflow-y-auto">
         {/* Header card */}
         <div className="px-8 pt-10">
-          <div className="flex items-center gap-4">
+          <div className="flex items-start gap-4">
             <Avatar id={session.id} label={label} size={56} />
-            <div className="min-w-0">
-              <h2 className="truncate text-[18px] font-semibold text-strong" title={title}>
-                {title}
-              </h2>
-              <div className="mt-1 flex items-center gap-2 text-[12px]" style={{ color: "var(--text-muted)" }}>
+            <div className="min-w-0 flex-1">
+              <NameEditor
+                key={session.id}
+                value={session.title ?? ""}
+                display={title}
+                placeholder={t("profile.namePlaceholder")}
+                editLabel={t("profile.editName")}
+                onSave={(v) => void renameSession(session.id, v)}
+              />
+              {showTask && (
+                <div className="mt-0.5 truncate text-[12.5px]" style={{ color: "var(--text-secondary)" }} title={taskLine}>
+                  {taskLine}
+                </div>
+              )}
+              <div className="mt-1.5 flex items-center gap-2 text-[12px]" style={{ color: "var(--text-muted)" }}>
                 <span
                   className="rounded px-1.5 py-0.5 font-semibold uppercase tracking-wide"
                   style={{ color: "var(--text-secondary)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
@@ -320,9 +334,22 @@ function ContactProfile({
             </div>
           </div>
 
+          {/* Self-introduction: who this agent is, so peers can decide to reach out. */}
+          <AboutEditor
+            key={"about-" + session.id}
+            value={session.description ?? ""}
+            placeholder={t("profile.aboutPlaceholder")}
+            editLabel={t("profile.editAbout")}
+            heading={t("profile.about")}
+            onSave={(v) => void setSessionDescription(session.id, v)}
+          />
+
           <div className="my-6 h-px w-full" style={{ background: "var(--border)" }} />
 
           {/* Field rows */}
+          <Field label={t("profile.agentId")}>
+            <CopyId value={session.id} copiedLabel={t("profile.copied")} copyLabel={t("profile.copy")} />
+          </Field>
           <Field label={t("profile.workdir")}>
             <span className="break-all font-mono text-[12.5px]" style={{ color: session.workPath ? "var(--text)" : "var(--text-muted)" }}>
               {session.workPath || t("profile.pathNotSet")}
@@ -335,13 +362,7 @@ function ContactProfile({
           </Field>
           {session.nativeSessionId && (
             <Field label={t("profile.sessionId")}>
-              <code
-                className="break-all text-[12px]"
-                style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}
-                title={session.nativeSessionId}
-              >
-                {session.nativeSessionId}
-              </code>
+              <CopyId value={session.nativeSessionId} copiedLabel={t("profile.copied")} copyLabel={t("profile.copy")} mono />
             </Field>
           )}
 
@@ -484,6 +505,211 @@ function Field({ label, children, top }: { label: string; children: React.ReactN
         {label}
       </div>
       <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+// Inline editor for the contact's display name. Hover reveals a pencil; clicking
+// swaps the heading for an input. Empty save clears the override (reverts to the
+// agent's task). `display` is what renders when not editing (already name-resolved).
+function NameEditor({
+  value,
+  display,
+  placeholder,
+  editLabel,
+  onSave,
+}: {
+  value: string;
+  display: string;
+  placeholder: string;
+  editLabel: string;
+  onSave: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    const v = draft.trim();
+    onSave(v ? v : null);
+    setEditing(false);
+  };
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") cancel();
+        }}
+        placeholder={placeholder}
+        className="w-full rounded-md px-1.5 py-0.5 text-[18px] font-semibold outline-none"
+        style={{ color: "var(--text)", background: "var(--surface-card)", border: "1px solid var(--accent)" }}
+      />
+    );
+  }
+  return (
+    <div className="group flex items-center gap-1.5">
+      <h2 className="truncate text-[18px] font-semibold text-strong" title={display}>
+        {display}
+      </h2>
+      <button
+        onClick={() => { setDraft(value); setEditing(true); }}
+        aria-label={editLabel}
+        title={editLabel}
+        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        style={{ color: "var(--text-muted)" }}
+      >
+        <Pencil size={13} />
+      </button>
+    </div>
+  );
+}
+
+// Self-introduction block. Shows the bio (or a muted prompt) with a hover pencil;
+// editing swaps in a textarea with save / cancel.
+function AboutEditor({
+  value,
+  placeholder,
+  editLabel,
+  heading,
+  onSave,
+}: {
+  value: string;
+  placeholder: string;
+  editLabel: string;
+  heading: string;
+  onSave: (v: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (editing) ref.current?.focus();
+  }, [editing]);
+
+  const commit = () => {
+    const v = draft.trim();
+    onSave(v ? v : null);
+    setEditing(false);
+  };
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+
+  return (
+    <div className="mt-5">
+      <div className="mb-1.5 flex items-center gap-1.5">
+        <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+          {heading}
+        </span>
+        {!editing && (
+          <button
+            onClick={() => { setDraft(value); setEditing(true); }}
+            aria-label={editLabel}
+            title={editLabel}
+            className="shrink-0"
+            style={{ color: "var(--text-muted)" }}
+          >
+            <Pencil size={12} />
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <textarea
+            ref={ref}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") cancel();
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commit();
+            }}
+            placeholder={placeholder}
+            rows={3}
+            className="w-full resize-y rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none"
+            style={{ color: "var(--text)", background: "var(--surface-card)", border: "1px solid var(--accent)" }}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={commit}
+              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-semibold"
+              style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
+            >
+              <Check size={12} /> {/* save */}
+            </button>
+            <button
+              onClick={cancel}
+              className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[12px] font-semibold"
+              style={{ color: "var(--text-secondary)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <p
+          className="whitespace-pre-wrap text-[13px] leading-relaxed"
+          style={{ color: value ? "var(--text)" : "var(--text-muted)" }}
+        >
+          {value || placeholder}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// A monospace id with a one-click copy button (the necessary peer address / the
+// runtime's resume id).
+function CopyId({
+  value,
+  copyLabel,
+  copiedLabel,
+  mono,
+}: {
+  value: string;
+  copyLabel: string;
+  copiedLabel: string;
+  mono?: boolean;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch { /* clipboard may be blocked */ }
+  };
+  return (
+    <div className="group flex items-center gap-2">
+      <code
+        className={"break-all text-[12px] " + (mono ? "" : "")}
+        style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)" }}
+        title={value}
+      >
+        {value}
+      </code>
+      <button
+        onClick={() => void copy()}
+        aria-label={copied ? copiedLabel : copyLabel}
+        title={copied ? copiedLabel : copyLabel}
+        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        style={{ color: copied ? "var(--green)" : "var(--text-muted)" }}
+      >
+        {copied ? <Check size={13} /> : <Copy size={13} />}
+      </button>
     </div>
   );
 }

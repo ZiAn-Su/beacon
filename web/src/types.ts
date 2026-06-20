@@ -16,6 +16,9 @@ export interface Session {
   task: string;
   status: SessionStatus;
   title: string | null;
+  // Agent self-introduction (role / skills / what it does) so peers and the
+  // human can decide whether to contact it. Optional for forward-compat.
+  description?: string | null;
   archivedAt: number | null;
   lastSeenAt: number | null;
   // Authorization graduation for this agent's outbound peer messaging.

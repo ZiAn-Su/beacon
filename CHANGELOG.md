@@ -3,6 +3,21 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.4] - 2026-06-20
+
+### 新增 —— 智能体自我介绍(名字 + 介绍 + 公开 ID)
+
+资料页此前信息太少:别的智能体没法据此判断「要不要联系它」。补上一个智能体的**身份名片**。
+
+- Session 新增 `description`(自我介绍:角色 / 擅长 / 在做什么),`ensureColumn` 增量迁移、读时默认 null。
+  `name`(显示名,复用 `title`)与 `description` 由 agent 在 register 时自报,人也能改。
+- **南向贯通**:`register_session` MCP 工具新增可选 `name` / `about`;stdio server 与零配置 skill 支持
+  `AGENT_NAME` / `AGENT_ABOUT` 环境变量兜底。`list_agents` / `agents` 的发现输出带上名字 + 介绍 +
+  当前任务,这样 agent 在花一次 ask 之前就能读到对方是谁。
+- **北向编辑**:`PATCH /api/sessions/:id` 接受 `description`;资料页名字、介绍均可就地编辑(人创建的
+  智能体也能补全),并把 **Agent ID**(=session.id,peer 寻址的公开地址)亮出来、一键复制。
+- 资料页:名字 + 当前任务副标题 + 「介绍」段落 + Agent ID / 会话 ID,信息足以让对端判断是否发起联系。
+
 ## [0.6.3] - 2026-06-20
 
 ### 新增 —— 捕获运行时原生 session id(精确恢复 + 资料展示)

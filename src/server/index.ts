@@ -78,7 +78,7 @@ function agentAuthOk(req: Request, res: Response): boolean {
 // ----------------------------------------------------------------------------
 app.post('/api/sessions/register', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
-  const { runtime, workPath, task, bindKey, name, origin, nativeSessionId } = req.body ?? {};
+  const { runtime, workPath, task, bindKey, name, description, origin, nativeSessionId } = req.body ?? {};
   // ISS-003: require runtime and task; workPath optional (some agents run anywhere)
   if (!String(runtime ?? '').trim()) {
     res.status(400).json({ error: 'runtime is required' }); return;
@@ -96,6 +96,7 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
     nativeSessionId: nativeSessionId != null ? String(nativeSessionId) : null,
     origin: origin === 'human' ? 'human' : 'agent',
     name: name != null ? String(name) : null,
+    description: description != null ? String(description) : null,
   });
   ok(res, { session, agentId: session.id });
 });
@@ -424,8 +425,8 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   if (!store.getSession(id)) return notFound(res);
   // ISS-008: 400 if no recognised fields provided (hides misspelled field names)
   const body = req.body ?? {};
-  if (!('title' in body) && typeof body.archived !== 'boolean' && !('trustTier' in body)) {
-    res.status(400).json({ error: 'no patchable fields in body; expected title, archived or trustTier' }); return;
+  if (!('title' in body) && !('description' in body) && typeof body.archived !== 'boolean' && !('trustTier' in body)) {
+    res.status(400).json({ error: 'no patchable fields in body; expected title, description, archived or trustTier' }); return;
   }
   // Validate trustTier up front so an invalid value is a 400, not a silent no-op.
   if ('trustTier' in body && !(TRUST_TIERS as readonly string[]).includes(String(body.trustTier))) {
@@ -435,6 +436,10 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   if ('title' in (req.body ?? {})) {
     const t = req.body.title;
     session = store.renameSession(id, t == null ? null : String(t)) ?? session;
+  }
+  if ('description' in (req.body ?? {})) {
+    const d = req.body.description;
+    session = store.setDescription(id, d == null ? null : String(d)) ?? session;
   }
   if (typeof req.body?.archived === 'boolean') {
     session = store.setArchived(id, req.body.archived) ?? session;

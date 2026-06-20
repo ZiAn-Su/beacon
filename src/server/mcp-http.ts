@@ -25,6 +25,8 @@ function storeOps(): AgentOps {
         workPath: input.workPath || '',
         task: input.task || '',
         nativeSessionId: input.nativeSessionId ?? null,
+        name: input.name ?? null,
+        description: input.description ?? null,
       });
       return { id: s.id };
     },
@@ -57,6 +59,8 @@ function storeOps(): AgentOps {
         task: s.task,
         status: s.status,
         runtime: s.runtime,
+        name: s.title ?? null,
+        description: s.description ?? null,
       }));
     },
     async peerNotify(fromId, targetId, text) {

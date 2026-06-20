@@ -95,6 +95,8 @@ Guardianship:  Human ──监护──▶ Agent
 
 点开任一联系人,其信息页除了 name / runtime / workPath / 状态 / 信任档位外,**必须包含它自身的社交入口**:
 
+- **自我介绍(`description`)**:该 agent 的名片 —— 角色 / 擅长 / 在做什么。别的智能体据此判断「要不要联系它」,所以名字 + 介绍是最低限度的可读身份。agent 在 register 时自报(`register_session` 的 `name` / `about`,或 `AGENT_NAME` / `AGENT_ABOUT` 环境变量),人也能在资料页就地改;`list_agents` 的发现输出会带上名字 + 介绍。它是**属性**,不是身份主键。
+- **Agent ID(`contact.id`)**:peer 寻址用的公开地址,资料页一键复制即可交给别的 agent 去 `notify_agent` / `ask_agent`。
 - **它的联系人**:该 agent 被授权能联系的所有 Principal(它的地址簿),可由此查看/管理那些 contact 授权。
 - **它的群组**:该 agent 所在的所有 Channel/群组,可由此进入对应对话。
 

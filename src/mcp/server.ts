@@ -30,6 +30,10 @@ const NATIVE_SESSION_ID =
   process.env.CLAUDE_CODE_SESSION_ID ??
   process.env.CODEX_SESSION_ID ??
   null;
+// Optional self-introduction defaults so the human/peers know who this is even
+// if the agent never calls register_session with name/about explicitly.
+const AGENT_NAME = process.env.AGENT_NAME ?? null;
+const AGENT_ABOUT = process.env.AGENT_ABOUT ?? process.env.AGENT_DESCRIPTION ?? null;
 
 const server = new McpServer({ name: 'beacon', version: '0.4.0' });
 registerBeaconTools(server, httpOps(PLATFORM_URL, PLATFORM_TOKEN), {
@@ -37,6 +41,8 @@ registerBeaconTools(server, httpOps(PLATFORM_URL, PLATFORM_TOKEN), {
   workPath: WORK_PATH,
   task: DEFAULT_TASK,
   nativeSessionId: NATIVE_SESSION_ID,
+  name: AGENT_NAME,
+  description: AGENT_ABOUT,
 });
 
 const transport = new StdioServerTransport();
