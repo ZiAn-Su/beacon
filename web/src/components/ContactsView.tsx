@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, BookUser, Check, Copy, MessageSquare, Pencil, Plus, Search, Trash2, User, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookUser, Check, CheckSquare, Copy, MessageSquare, Pencil, Plus, Search, Square, Trash2, User, X } from "lucide-react";
 import type { Session, TrustTier } from "../types";
 import {
   createGrant,
@@ -38,8 +38,13 @@ interface Props {
 
 export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpenManage, onOpenAdd }: Props) {
   const { t } = useI18n();
+  const { batchSessions } = useStore();
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [confirmBatch, setConfirmBatch] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const active = useMemo(
     () => sessions.filter((s) => s.archivedAt == null),
@@ -70,6 +75,32 @@ export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpen
     () => sessions.find((s) => s.id === selectedId) ?? null,
     [sessions, selectedId],
   );
+
+  // Ids currently shown (active, plus archived when expanded) — the scope that
+  // "select all" and batch actions operate on.
+  const visibleIds = useMemo(
+    () => [...rosterActive, ...(showArchived ? rosterArchived : [])].map((s) => s.id),
+    [rosterActive, rosterArchived, showArchived],
+  );
+  const allPicked = visibleIds.length > 0 && visibleIds.every((id) => picked.has(id));
+
+  const togglePick = (id: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const exitSelect = () => { setSelectMode(false); setPicked(new Set()); setConfirmBatch(false); };
+  const toggleAll = () =>
+    setPicked(allPicked ? new Set() : new Set(visibleIds));
+  const runBatch = async (action: "archive" | "delete") => {
+    const ids = [...picked];
+    if (!ids.length) return;
+    setBusy(true);
+    try { await batchSessions(ids, action); exitSelect(); }
+    catch { /* ignore */ } finally { setBusy(false); }
+  };
 
   return (
     <div className="flex h-full min-w-0 flex-1">
@@ -110,6 +141,28 @@ export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpen
             <BookUser size={13} />
             {t("contactsView.manage")}
           </button>
+
+          {/* Batch-select toggle / controls */}
+          {!selectMode ? (
+            <button
+              onClick={() => setSelectMode(true)}
+              className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg py-1 text-[11.5px] font-medium transition-colors"
+              style={{ color: "var(--text-muted)" }}
+            >
+              <CheckSquare size={12} />
+              {t("contactsView.select")}
+            </button>
+          ) : (
+            <div className="mt-1.5 flex items-center justify-between px-0.5 text-[11.5px]">
+              <button onClick={toggleAll} className="font-medium" style={{ color: "var(--accent)" }}>
+                {allPicked ? t("contactsView.selectNone") : t("contactsView.selectAll")}
+              </button>
+              <span style={{ color: "var(--text-muted)" }}>{t("contactsView.pickedN", { n: picked.size })}</span>
+              <button onClick={exitSelect} className="font-medium" style={{ color: "var(--text-secondary)" }}>
+                {t("contactsView.selectDone")}
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="scroll-area mt-2 flex-1 overflow-y-auto px-2 pb-2">
@@ -119,6 +172,9 @@ export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpen
             selectedId={selectedId}
             onSelect={onSelect}
             emptyLabel={t("contactsView.empty")}
+            selectMode={selectMode}
+            picked={picked}
+            onTogglePick={togglePick}
           />
           {rosterArchived.length > 0 && (
             <div className="mt-2">
@@ -137,11 +193,65 @@ export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpen
                   selectedId={selectedId}
                   onSelect={onSelect}
                   dim
+                  selectMode={selectMode}
+                  picked={picked}
+                  onTogglePick={togglePick}
                 />
               )}
             </div>
           )}
         </div>
+
+        {/* Batch action bar */}
+        {selectMode && (
+          <div className="border-t px-3 py-2.5" style={{ borderColor: "var(--border)", background: "var(--surface-card)" }}>
+            {confirmBatch ? (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12px]" style={{ color: "var(--danger)" }}>
+                  {t("contactsView.confirmDeleteN", { n: picked.size })}
+                </span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <button
+                    disabled={busy}
+                    onClick={() => void runBatch("delete")}
+                    className="rounded-md px-2.5 py-1 text-[12px] font-semibold disabled:opacity-40"
+                    style={{ color: "#fff", background: "var(--danger)", border: "1px solid var(--danger)" }}
+                  >
+                    {t("profile.deleteYes")}
+                  </button>
+                  <button
+                    onClick={() => setConfirmBatch(false)}
+                    className="rounded-md px-2.5 py-1 text-[12px] font-medium"
+                    style={{ color: "var(--text-secondary)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+                  >
+                    {t("profile.deleteCancel")}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={busy || picked.size === 0}
+                  onClick={() => void runBatch("archive")}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-[12.5px] font-semibold transition-colors disabled:opacity-40"
+                  style={{ color: "var(--text)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+                >
+                  <Archive size={13} />
+                  {t("contactsView.archiveN", { n: picked.size })}
+                </button>
+                <button
+                  disabled={busy || picked.size === 0}
+                  onClick={() => setConfirmBatch(true)}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-[12.5px] font-semibold transition-colors disabled:opacity-40"
+                  style={{ color: "var(--danger)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+                >
+                  <Trash2 size={13} />
+                  {t("contactsView.deleteN", { n: picked.size })}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Right: profile detail */}
@@ -174,6 +284,9 @@ function RosterSection({
   onSelect,
   emptyLabel,
   dim,
+  selectMode,
+  picked,
+  onTogglePick,
 }: {
   title?: string;
   list: Session[];
@@ -181,6 +294,9 @@ function RosterSection({
   onSelect: (id: string) => void;
   emptyLabel?: string;
   dim?: boolean;
+  selectMode?: boolean;
+  picked?: Set<string>;
+  onTogglePick?: (id: string) => void;
 }) {
   return (
     <div className={dim ? "opacity-75" : undefined}>
@@ -202,16 +318,22 @@ function RosterSection({
             const label = pathBase(s.workPath) || s.runtime;
             const title = sessionName(s, label);
             const online = isOnline(s, Date.now());
-            const active = selectedId === s.id;
+            const isPicked = !!picked?.has(s.id);
+            const active = selectMode ? isPicked : selectedId === s.id;
             return (
               <li key={s.id}>
                 <button
-                  onClick={() => onSelect(s.id)}
+                  onClick={() => (selectMode ? onTogglePick?.(s.id) : onSelect(s.id))}
                   className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition-colors"
                   style={{ background: active ? "var(--accent-soft)" : "transparent" }}
                   onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "var(--surface-hover)"; }}
                   onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
                 >
+                  {selectMode && (
+                    <span className="shrink-0" style={{ color: isPicked ? "var(--accent)" : "var(--text-muted)" }}>
+                      {isPicked ? <CheckSquare size={16} /> : <Square size={16} />}
+                    </span>
+                  )}
                   <div className="relative shrink-0">
                     <Avatar id={s.id} label={label} size={32} />
                     <span

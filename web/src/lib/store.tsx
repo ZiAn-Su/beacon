@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Message, Session, WsEvent } from "../types";
 import {
+  batchSessions as batchSessionsApi,
   cancelAsk,
   deleteSession as deleteSessionApi,
   getConversation,
@@ -51,6 +52,10 @@ interface StoreState {
   setSessionDescription: (sessionId: string, description: string | null) => Promise<void>;
   setArchived: (sessionId: string, archived: boolean) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
+  batchSessions: (
+    ids: string[],
+    action: "archive" | "unarchive" | "delete",
+  ) => Promise<void>;
   setSessionTrustTier: (sessionId: string, trustTier: string) => Promise<void>;
   startAgent: (sessionId: string, text: string) => Promise<string>;
   settings: AppSettings | null;
@@ -375,6 +380,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     await deleteSessionApi(sessionId);
   }, []);
 
+  const batchSessions = useCallback(
+    async (ids: string[], action: "archive" | "unarchive" | "delete") => {
+      if (action === "delete") {
+        const gone = new Set(ids);
+        setSessions((prev) => prev.filter((s) => !gone.has(s.id)));
+        if (selectedIdRef.current && gone.has(selectedIdRef.current)) setSelectedId(null);
+      }
+      // Archive/unarchive reconcile via the WS 'session' events.
+      await batchSessionsApi(ids, action);
+    },
+    [],
+  );
+
   const value = useMemo<StoreState>(
     () => ({
       sessions,
@@ -397,6 +415,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setArchived,
       setSessionTrustTier,
       deleteSession,
+      batchSessions,
       startAgent,
       settings,
       updateSettings,
@@ -421,6 +440,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setArchived,
       setSessionTrustTier,
       deleteSession,
+      batchSessions,
       startAgent,
       settings,
       updateSettings,

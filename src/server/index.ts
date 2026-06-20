@@ -546,6 +546,30 @@ app.delete('/api/sessions/:id', (req: Request, res: Response) => {
   ok(res, { ok: removed });
 });
 
+// Batch management for the directory: archive / unarchive / delete many at once.
+// body { ids: string[], action: 'archive' | 'unarchive' | 'delete' }.
+app.post('/api/sessions/batch', (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const ids = Array.isArray(body.ids) ? body.ids.map(String) : [];
+  const action = String(body.action ?? '');
+  if (!ids.length) { res.status(400).json({ error: 'ids is required' }); return; }
+  let affected = 0;
+  if (action === 'delete') {
+    for (const id of ids) {
+      killPty(id);
+      if (store.deleteSession(id)) affected++;
+    }
+  } else if (action === 'archive' || action === 'unarchive') {
+    const archived = action === 'archive';
+    for (const id of ids) {
+      if (store.setArchived(id, archived)) affected++;
+    }
+  } else {
+    res.status(400).json({ error: 'invalid action; expected archive, unarchive or delete' }); return;
+  }
+  ok(res, { affected });
+});
+
 app.get('/api/health', (_req: Request, res: Response) =>
   res.json({ ok: true, version: VERSION, ts: Date.now() })
 );

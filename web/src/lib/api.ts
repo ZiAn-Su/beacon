@@ -208,6 +208,19 @@ export async function deleteSession(sessionId: string): Promise<void> {
   await json<{ ok: boolean }>(r);
 }
 
+/** Batch archive / unarchive / delete contacts. Returns the affected count. */
+export async function batchSessions(
+  ids: string[],
+  action: "archive" | "unarchive" | "delete",
+): Promise<number> {
+  const r = await fetch("/api/sessions/batch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids, action }),
+  });
+  return (await json<{ affected: number }>(r)).affected;
+}
+
 /** Rename and/or archive a conversation (PATCH /api/sessions/:id). */
 export async function patchSession(
   sessionId: string,
