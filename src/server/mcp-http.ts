@@ -30,6 +30,12 @@ function storeOps(): AgentOps {
       });
       return { id: s.id };
     },
+    async updateProfile(id, patch) {
+      store.updateProfile(id, {
+        name: patch.name,
+        description: patch.about,
+      });
+    },
     async notify(id, text) {
       store.addMessage({ sessionId: id, direction: 'agent', kind: 'notify', text });
     },

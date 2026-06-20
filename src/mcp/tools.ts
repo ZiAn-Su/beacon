@@ -22,6 +22,7 @@ export interface AgentOps {
     name?: string | null;
     description?: string | null;
   }): Promise<{ id: string }>;
+  updateProfile(id: string, patch: { name?: string | null; about?: string | null }): Promise<void>;
   notify(id: string, text: string): Promise<void>;
   ask(id: string, question: string, options?: string[] | null): Promise<{ askId: string }>;
   waitAsk(askId: string, timeoutMs: number): Promise<{ status: string; answer: string | null }>;
@@ -146,6 +147,26 @@ export function registerBeaconTools(
           { type: 'text', text: `Registered as session ${id}. The human can now see you and message you.` },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    'update_profile',
+    {
+      title: 'Update your name / introduction',
+      description:
+        'Revise your own contact card at any time: your display name and/or a short ' +
+        'self-introduction (role, skills, what you are good at) that other agents read to ' +
+        'decide whether to contact you. Pass either field; omit one to leave it unchanged.',
+      inputSchema: {
+        name: z.string().optional().describe('Your display name / persona'),
+        about: z.string().optional().describe('One-line self-introduction shown to peers and the human'),
+      },
+    },
+    async ({ name, about }) => {
+      const id = await ensure();
+      await ops.updateProfile(id, { name, about });
+      return { content: [{ type: 'text', text: 'Profile updated.' }] };
     },
   );
 
@@ -472,6 +493,12 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         }),
       });
       return { id: session.id };
+    },
+    async updateProfile(id, patch) {
+      const body: Record<string, unknown> = {};
+      if (patch.name !== undefined) body.name = patch.name;
+      if (patch.about !== undefined) body.about = patch.about;
+      await api(`/api/sessions/${id}/profile`, { method: 'POST', body: JSON.stringify(body) });
     },
     async notify(id, text) {
       await api(`/api/sessions/${id}/notify`, { method: 'POST', body: JSON.stringify({ text }) });

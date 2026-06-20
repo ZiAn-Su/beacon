@@ -175,6 +175,23 @@ app.get('/api/sessions/:id/inbox', (req: Request, res: Response) => {
   ok(res, { messages: store.inbox(param(req,'id'), after) });
 });
 
+// The agent revises its own card (display name and/or self-introduction) at any
+// time. body { name?, about? } — each field optional; '' / null clears it.
+app.post('/api/sessions/:id/profile', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  if (!store.getSession(param(req, 'id'))) return notFound(res);
+  const body = req.body ?? {};
+  const patch: { name?: string | null; description?: string | null } = {};
+  if ('name' in body) patch.name = body.name == null ? null : String(body.name);
+  if ('about' in body) patch.description = body.about == null ? null : String(body.about);
+  if (!('name' in patch) && !('description' in patch)) {
+    res.status(400).json({ error: 'expected name and/or about' }); return;
+  }
+  store.touchSeen(param(req, 'id'));
+  const session = store.updateProfile(param(req, 'id'), patch);
+  ok(res, { session });
+});
+
 // --- agent -> agent (peer) ---
 // Per-pair authorization: resolvePeerPermission folds the global master switch
 // (agentComm 'off'), any exact-pair grant, the sender's trust tier, and the

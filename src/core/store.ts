@@ -333,6 +333,13 @@ export function registerOrClaim(input: {
       const ts = now();
       updateSeen.run({ id: existing.id, lastSeenAt: ts });
       updateSessionStatus.run({ id: existing.id, status: 'working', updatedAt: ts });
+      // Refresh the card if the agent supplied a new name / intro on resume.
+      if (input.name != null && input.name.trim()) {
+        updateSessionTitle.run({ id: existing.id, title: input.name.trim() });
+      }
+      if (input.description != null && input.description.trim()) {
+        updateSessionDescription.run({ id: existing.id, description: input.description.trim() });
+      }
       const continued = getSession(existing.id)!;
       bus.emit('session', continued);
       return continued;
@@ -374,6 +381,31 @@ export function setDescription(id: string, description: string | null): Session 
   if (!s) return undefined;
   const clean = description && description.trim() ? description.trim() : null;
   updateSessionDescription.run({ id, description: clean });
+  const updated = getSession(id)!;
+  bus.emit('session', updated);
+  return updated;
+}
+
+/**
+ * Update the agent's own name and/or self-introduction. Each field is optional:
+ * `undefined` leaves it untouched, `''`/null clears it. Used by the agent-facing
+ * update_profile tool so an agent can revise its card at any time (not just at
+ * register), and by the human PATCH path.
+ */
+export function updateProfile(
+  id: string,
+  patch: { name?: string | null; description?: string | null },
+): Session | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  if (patch.name !== undefined) {
+    const clean = patch.name && patch.name.trim() ? patch.name.trim() : null;
+    updateSessionTitle.run({ id, title: clean });
+  }
+  if (patch.description !== undefined) {
+    const clean = patch.description && patch.description.trim() ? patch.description.trim() : null;
+    updateSessionDescription.run({ id, description: clean });
+  }
   const updated = getSession(id)!;
   bus.emit('session', updated);
   return updated;

@@ -346,9 +346,18 @@ function ContactProfile({
 
           <div className="my-6 h-px w-full" style={{ background: "var(--border)" }} />
 
-          {/* Field rows */}
+          {/* Identity metadata — compact key/value rows. */}
           <Field label={t("profile.agentId")}>
-            <CopyId value={session.id} copiedLabel={t("profile.copied")} copyLabel={t("profile.copy")} />
+            <CopyId value={session.id} copiedLabel={t("profile.copied")} copyLabel={t("profile.copy")} mono />
+          </Field>
+          <Field label={t("profile.sessionId")}>
+            {session.nativeSessionId ? (
+              <CopyId value={session.nativeSessionId} copiedLabel={t("profile.copied")} copyLabel={t("profile.copy")} mono />
+            ) : (
+              <span className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+                {t("profile.sessionIdMissing")}
+              </span>
+            )}
           </Field>
           <Field label={t("profile.workdir")}>
             <span className="break-all font-mono text-[12.5px]" style={{ color: session.workPath ? "var(--text)" : "var(--text-muted)" }}>
@@ -360,103 +369,94 @@ function ContactProfile({
               {session.origin === "human" ? t("profile.originHuman") : t("profile.originAgent")}
             </span>
           </Field>
-          {session.nativeSessionId && (
-            <Field label={t("profile.sessionId")}>
-              <CopyId value={session.nativeSessionId} copiedLabel={t("profile.copied")} copyLabel={t("profile.copy")} mono />
-            </Field>
-          )}
 
-          {/* Trust tier */}
-          <Field label={t("profile.trust")}>
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <div className="flex flex-wrap gap-1.5">
-                {TRUST_TIERS.map((tt) => {
-                  const a = tier === tt;
-                  return (
-                    <button
-                      key={tt}
-                      onClick={() => void setSessionTrustTier(session.id, tt)}
-                      title={t(`trust.${tt}Desc`)}
-                      className="rounded-full px-2.5 py-0.5 text-[11px] font-medium transition-colors"
-                      style={{
-                        color: a ? "#fff" : "var(--text-secondary)",
-                        background: a ? "var(--accent)" : "var(--surface-card)",
-                        border: `1px solid ${a ? "var(--accent)" : "var(--border)"}`,
-                      }}
-                    >
-                      {t(`trust.${tt}`)}
-                    </button>
-                  );
-                })}
-              </div>
-              <span className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
-                {t("profile.trustHint")}
-              </span>
+          <div className="my-6 h-px w-full" style={{ background: "var(--border)" }} />
+
+          {/* Trust tier — segmented control + the selected tier's meaning. */}
+          <Section title={t("profile.trust")}>
+            <div className="inline-flex rounded-lg p-0.5" style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}>
+              {TRUST_TIERS.map((tt) => {
+                const a = tier === tt;
+                return (
+                  <button
+                    key={tt}
+                    onClick={() => void setSessionTrustTier(session.id, tt)}
+                    className="rounded-md px-3 py-1 text-[12px] font-medium transition-colors"
+                    style={{
+                      color: a ? "#fff" : "var(--text-secondary)",
+                      background: a ? "var(--accent)" : "transparent",
+                    }}
+                  >
+                    {t(`trust.${tt}`)}
+                  </button>
+                );
+              })}
             </div>
-          </Field>
+            <p className="mt-2.5 text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+              {t(`trust.${tier}Desc`)}
+            </p>
+          </Section>
 
           {/* Its address book: who it can reach / request, with status + actions. */}
-          <Field label={t("profile.contacts")} top>
-            <div className="flex min-w-0 flex-col gap-2">
-              {book.length === 0 ? (
-                <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-                  {t("profile.noContacts")}
-                </span>
-              ) : (
-                <ul className="flex flex-col gap-1.5">
-                  {book.map(({ peer, status, grantId }) => (
-                    <li
-                      key={peer.id}
-                      className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px]"
-                      style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
-                    >
-                      <Avatar id={peer.id} label={pathBase(peer.workPath) || peer.runtime} size={22} />
-                      <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text)" }}>
-                        {sessionName(peer, pathBase(peer.workPath) || peer.runtime)}
-                      </span>
-                      <StatusPill status={status} />
-                      <div className="flex shrink-0 items-center gap-1">
-                        {status === "allow" || status === "deny" ? (
+          <Section title={t("profile.contacts")}>
+            {book.length === 0 ? (
+              <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+                {t("profile.noContacts")}
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {book.map(({ peer, status, grantId }) => (
+                  <li
+                    key={peer.id}
+                    className="flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[12.5px]"
+                    style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
+                  >
+                    <Avatar id={peer.id} label={pathBase(peer.workPath) || peer.runtime} size={22} />
+                    <span className="min-w-0 flex-1 truncate" style={{ color: "var(--text)" }}>
+                      {sessionName(peer, pathBase(peer.workPath) || peer.runtime)}
+                    </span>
+                    <StatusPill status={status} />
+                    <div className="flex shrink-0 items-center gap-1">
+                      {status === "allow" || status === "deny" ? (
+                        <button
+                          disabled={busy}
+                          onClick={() => void clearEdge(grantId!)}
+                          aria-label={t("dir.removeGrant")}
+                          title={t("dir.removeGrant")}
+                          className="flex h-5 w-5 items-center justify-center rounded disabled:opacity-40"
+                          style={{ color: "var(--text-muted)" }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      ) : status === "open" ? (
+                        <>
                           <button
                             disabled={busy}
-                            onClick={() => void clearEdge(grantId!)}
-                            aria-label={t("dir.removeGrant")}
-                            title={t("dir.removeGrant")}
-                            className="flex h-5 w-5 items-center justify-center rounded disabled:opacity-40"
-                            style={{ color: "var(--text-muted)" }}
+                            onClick={() => void setEdge(peer.id, "allow")}
+                            className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-40"
+                            style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
                           >
-                            <Trash2 size={12} />
+                            {t("dir.allow")}
                           </button>
-                        ) : status === "open" ? (
-                          <>
-                            <button
-                              disabled={busy}
-                              onClick={() => void setEdge(peer.id, "allow")}
-                              className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-40"
-                              style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
-                            >
-                              {t("dir.allow")}
-                            </button>
-                            <button
-                              disabled={busy}
-                              onClick={() => void setEdge(peer.id, "deny")}
-                              className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-40"
-                              style={{ color: "var(--text-secondary)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
-                            >
-                              {t("dir.deny")}
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
-                {t("profile.contactsHint")}
-              </span>
-            </div>
-          </Field>
+                          <button
+                            disabled={busy}
+                            onClick={() => void setEdge(peer.id, "deny")}
+                            className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold disabled:opacity-40"
+                            style={{ color: "var(--text-secondary)", background: "var(--bg-sidebar)", border: "1px solid var(--border)" }}
+                          >
+                            {t("dir.deny")}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
+              {t("profile.contactsHint")}
+            </p>
+          </Section>
         </div>
       </div>
 
@@ -497,7 +497,7 @@ function StatusPill({ status }: { status: "allow" | "deny" | "pending" | "open" 
 
 function Field({ label, children, top }: { label: string; children: React.ReactNode; top?: boolean }) {
   return (
-    <div className="mb-4 flex gap-4">
+    <div className="mb-3 flex gap-4">
       <div
         className={"w-20 shrink-0 text-[12.5px] " + (top ? "pt-1" : "")}
         style={{ color: "var(--text-muted)" }}
@@ -505,6 +505,19 @@ function Field({ label, children, top }: { label: string; children: React.ReactN
         {label}
       </div>
       <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  );
+}
+
+// A titled block for the interactive sections (trust, contacts) — sets them
+// apart from the flat key/value metadata above with a clear heading.
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="mb-6">
+      <div className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+        {title}
+      </div>
+      {children}
     </div>
   );
 }
@@ -568,7 +581,7 @@ function NameEditor({
         onClick={() => { setDraft(value); setEditing(true); }}
         aria-label={editLabel}
         title={editLabel}
-        className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+        className="shrink-0 transition-colors hover:opacity-100"
         style={{ color: "var(--text-muted)" }}
       >
         <Pencil size={13} />

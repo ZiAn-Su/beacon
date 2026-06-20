@@ -124,6 +124,14 @@ try {
     const id = await ensureSession();
     await api(`/api/sessions/${id}/status`, { status: args[0] });
     console.log(`status set to ${args[0]}`);
+  } else if (cmd === 'name') {
+    const id = await ensureSession();
+    await api(`/api/sessions/${id}/profile`, { name: args.join(' ') });
+    console.log('name updated');
+  } else if (cmd === 'about') {
+    const id = await ensureSession();
+    await api(`/api/sessions/${id}/profile`, { about: args.join(' ') });
+    console.log('introduction updated');
   } else if (cmd === 'inbox') {
     const c = loadCache();
     const id = c.sessionId || (await ensureSession());
@@ -174,7 +182,7 @@ try {
     await api(`/api/sessions/${id}/peer-reply`, { askId, text: args.slice(1).join(' ') });
     console.log('answered');
   } else {
-    console.log('usage: node beacon.mjs <register [task] | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...>>');
+    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...>>');
     process.exit(1);
   }
 } catch (e) {
