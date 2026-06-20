@@ -16,9 +16,9 @@ import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { SESSION_STATUSES, TRUST_TIERS } from '../core/types';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs, hasLivePty, writeToPty } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch } from './pty';
 import { startAgent, isOnline } from './wake';
-import { resolveActiveSessionId } from './agent-sessions';
+import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
 import { getSettings, setSettings } from '../core/settings';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -301,6 +301,62 @@ app.post('/api/sessions/:id/request-contact', (req: Request, res: Response) => {
 // ----------------------------------------------------------------------------
 app.get('/api/sessions', (_req: Request, res: Response) => {
   ok(res, { sessions: store.listSessions() });
+});
+
+// --- add an agent from the UI ---
+// Discover the runtime's existing conversations under a folder (objective, from
+// disk), so the human can import one as a contact. ?path=<workPath>&runtime=...
+// Each entry is flagged with whether it's already imported (a Beacon session
+// already carries that native id).
+app.get('/api/discover', (req: Request, res: Response) => {
+  const path = String(req.query.path ?? '');
+  const runtime = String(req.query.runtime ?? 'claude-code');
+  if (!path.trim()) { res.status(400).json({ error: 'path is required' }); return; }
+  const found = listAgentSessions(path, runtime);
+  const sessions = found.map((s) => {
+    const existing = store.getSessionByNativeId(s.nativeSessionId);
+    return { ...s, importedAs: existing ? existing.id : null };
+  });
+  ok(res, { sessions });
+});
+
+// Import a discovered conversation as a contact. Idempotent on native id.
+// body { workPath, runtime, nativeSessionId, name? }
+app.post('/api/sessions/import', (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const workPath = String(body.workPath ?? '');
+  const runtime = String(body.runtime ?? 'claude-code');
+  const nativeSessionId = String(body.nativeSessionId ?? '');
+  const name = body.name != null ? String(body.name) : null;
+  if (!nativeSessionId.trim()) { res.status(400).json({ error: 'nativeSessionId is required' }); return; }
+  const existing = store.getSessionByNativeId(nativeSessionId);
+  if (existing) { ok(res, { session: existing, imported: false }); return; }
+  const session = store.createSession({
+    runtime,
+    workPath,
+    task: name ?? '',
+    name,
+    nativeSessionId,
+    origin: 'human',
+  });
+  ok(res, { session, imported: true });
+});
+
+// Create a brand-new agent and launch it in the chosen folder, wired to Beacon
+// (BEACON_SESSION_ID is injected by the PTY so the agent attaches to THIS
+// contact). body { workPath, runtime, name?, task? }
+app.post('/api/sessions/launch', (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  const workPath = String(body.workPath ?? '');
+  const runtime = String(body.runtime ?? 'claude-code');
+  const name = body.name != null ? String(body.name) : null;
+  const task = body.task != null ? String(body.task) : '';
+  if (!workPath.trim()) { res.status(400).json({ error: 'workPath is required' }); return; }
+  const session = store.createSession({ runtime, workPath, task, name, origin: 'human' });
+  // Start a fresh agent process (not a resume) in the folder.
+  markFreshLaunch(session.id);
+  const launched = ensurePty(session.id);
+  ok(res, { session, launched });
 });
 
 // Agent directory. Human side (no query) => every contact. Agent-side discovery

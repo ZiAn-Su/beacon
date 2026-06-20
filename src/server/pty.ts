@@ -118,15 +118,24 @@ export function writeToPty(sessionId: string, text: string): boolean {
   return true;
 }
 
-function spawnTarget(runtime: string, nativeSessionId: string | null): SpawnTarget {
+// Sessions the human just created in the UI: start a FRESH agent (no resume /
+// continue, which would attach to an unrelated recent conversation in the dir).
+const freshLaunch = new Set<string>();
+/** Mark a session so its next spawn starts a brand-new agent process. */
+export function markFreshLaunch(sessionId: string): void {
+  freshLaunch.add(sessionId);
+}
+
+function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boolean): SpawnTarget {
   const wrap = (cmd: string): SpawnTarget =>
     isWin
       ? { file: 'cmd.exe', args: ['/k', cmd] }
       : { file: process.env.SHELL ?? 'bash', args: ['-c', `exec ${cmd}`] };
 
   if (runtime === 'claude-code' || runtime === 'claude') {
-    // Resume the EXACT conversation when the platform knows its native id;
-    // otherwise the most recent one in the work dir.
+    // Fresh launch -> a new conversation. Otherwise resume the EXACT conversation
+    // when the platform knows its native id; else the most recent in the work dir.
+    if (fresh) return wrap('claude');
     return wrap(nativeSessionId ? `claude --resume ${nativeSessionId}` : 'claude --continue');
   }
   if (runtime === 'codex') return wrap('codex');
@@ -144,7 +153,8 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
   const session = store.getSession(sessionId);
   if (!session) return { error: 'Session not found' };
 
-  const { file, args } = spawnTarget(session.runtime, session.nativeSessionId);
+  const fresh = freshLaunch.delete(sessionId);
+  const { file, args } = spawnTarget(session.runtime, session.nativeSessionId, fresh);
   const cols = 120;
   const rows = 30;
 

@@ -82,6 +82,51 @@ export async function listContactRequests(): Promise<ContactRequest[]> {
   return (await json<{ requests: ContactRequest[] }>(r)).requests;
 }
 
+// A runtime conversation found on disk under a folder, discoverable for import.
+export interface DiscoveredSession {
+  nativeSessionId: string;
+  title: string;
+  updatedAt: number;
+  importedAs: string | null; // Beacon session id if already imported, else null
+}
+
+export async function discoverAgents(
+  path: string,
+  runtime: string,
+): Promise<DiscoveredSession[]> {
+  const q = `path=${encodeURIComponent(path)}&runtime=${encodeURIComponent(runtime)}`;
+  const r = await fetch(`/api/discover?${q}`);
+  return (await json<{ sessions: DiscoveredSession[] }>(r)).sessions;
+}
+
+export async function importAgent(body: {
+  workPath: string;
+  runtime: string;
+  nativeSessionId: string;
+  name?: string | null;
+}): Promise<Session> {
+  const r = await fetch("/api/sessions/import", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await json<{ session: Session }>(r)).session;
+}
+
+export async function launchAgent(body: {
+  workPath: string;
+  runtime: string;
+  name?: string | null;
+  task?: string | null;
+}): Promise<Session> {
+  const r = await fetch("/api/sessions/launch", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await json<{ session: Session }>(r)).session;
+}
+
 export interface Conversation {
   session: Session;
   messages: Message[];

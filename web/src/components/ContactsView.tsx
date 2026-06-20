@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookUser, Check, Copy, MessageSquare, Pencil, Search, Trash2, User, X } from "lucide-react";
+import { BookUser, Check, Copy, MessageSquare, Pencil, Plus, Search, Trash2, User, X } from "lucide-react";
 import type { Session, TrustTier } from "../types";
 import {
   createGrant,
@@ -32,9 +32,11 @@ interface Props {
   onMessage: (id: string) => void;
   /** Open the authorization-overview dialog (the "Manage directory" action). */
   onOpenManage: () => void;
+  /** Open the "add an agent" dialog (discover existing / create new). */
+  onOpenAdd: () => void;
 }
 
-export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpenManage }: Props) {
+export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpenManage, onOpenAdd }: Props) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -91,8 +93,16 @@ export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpen
             />
           </div>
           <button
-            onClick={onOpenManage}
+            onClick={onOpenAdd}
             className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[12.5px] font-semibold transition-colors"
+            style={{ background: "var(--accent)", color: "#fff", border: "1px solid var(--accent)" }}
+          >
+            <Plus size={14} />
+            {t("contactsView.add")}
+          </button>
+          <button
+            onClick={onOpenManage}
+            className="mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[12.5px] font-semibold transition-colors"
             style={{ background: "var(--surface-card)", color: "var(--text)", border: "1px solid var(--border)" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface-card)"; }}

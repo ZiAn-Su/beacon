@@ -3,6 +3,22 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.7] - 2026-06-21
+
+### 新增 —— 在 UI 里添加智能体(发现已有 / 新建拉起)
+
+不必再去终端敲连接命令。通讯录页新增「添加智能体」入口,一个弹窗两条路:
+
+- **发现已有**:填(或自动带入选中联系人的)工作目录,平台扫该目录下运行时的磁盘会话
+  (`GET /api/discover`,复用 `agent-sessions.ts`),实时列出每段对话(标题取首条人类提问、原生 id、
+  时间),一键**导入**为联系人(`POST /api/sessions/import`,按原生 id 幂等;导入后能 `claude --resume`
+  精确续接)。列表每 4 秒轮询,新对话自动出现。
+- **新建拉起**:填名称/任务,`POST /api/sessions/launch` 在该目录起一个全新 agent(pty 注入
+  `BEACON_SESSION_ID`,`markFreshLaunch` 确保是干净的 `claude` 而非 `--continue`),随即作为联系人出现、可对话。
+- 前端 `AddAgentModal`:工作目录 + 运行时选择,发现列表(导入/已导入态),新建区(名称/任务/拉起)。
+- 实测:发现端点在本仓库目录列出 6 段对话;导入幂等且回填 `importedAs`;launch 建 origin=human 会话;
+  浏览器里弹窗自动带入目录并渲染出 6 行可导入对话。typecheck + encoding + web build 全过。
+
 ## [0.6.6] - 2026-06-20
 
 ### 改进 —— 会话 ID 由平台客观解析(不靠智能体上报)

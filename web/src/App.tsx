@@ -7,6 +7,7 @@ import { Conversation } from "./components/Conversation";
 import { SessionInfo } from "./components/SessionInfo";
 import { EmptyState } from "./components/EmptyState";
 import { ConnectAgentModal } from "./components/ConnectAgentModal";
+import { AddAgentModal } from "./components/AddAgentModal";
 import { DirectoryModal } from "./components/DirectoryModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { StoreProvider, useStore } from "./lib/store";
@@ -52,6 +53,7 @@ function Shell() {
   );
   const [infoOpen, setInfoOpen] = useState(true);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [directoryOpen, setDirectoryOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const notif = useDesktopNotifications();
@@ -312,6 +314,7 @@ function Shell() {
             setMobileView("conversation");
           }}
           onOpenManage={() => setDirectoryOpen(true)}
+          onOpenAdd={() => setAddOpen(true)}
         />
       )}
 
@@ -328,6 +331,20 @@ function Shell() {
       <ConnectAgentModal
         open={connectOpen}
         onClose={() => setConnectOpen(false)}
+      />
+
+      <AddAgentModal
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        defaultPath={
+          sessions.find((s) => s.id === contactId)?.workPath ??
+          selected?.workPath ??
+          ""
+        }
+        onAdded={(id) => {
+          setContactId(id);
+          setSelectedId(id);
+        }}
       />
 
       <DirectoryModal

@@ -42,6 +42,7 @@ function firstUserText(file: string): string {
   } catch {
     return '';
   }
+  let fallback = '';
   for (const line of head.split('\n')) {
     if (!line.trim()) continue;
     let o: { type?: string; message?: { role?: string; content?: unknown } };
@@ -55,9 +56,14 @@ function firstUserText(file: string): string {
       text = part ? String((part as { text?: string }).text ?? '') : '';
     }
     text = text.replace(/\s+/g, ' ').trim();
-    if (text) return text.length > 80 ? text.slice(0, 80) + '…' : text;
+    if (!text) continue;
+    if (!fallback) fallback = text;
+    // Skip injected wrappers (local-command output, command tags, image stubs,
+    // caveats) — find the first line that reads like a real human prompt.
+    if (/^(<|Caveat:|\[Image)/.test(text)) continue;
+    return text.length > 80 ? text.slice(0, 80) + '…' : text;
   }
-  return '';
+  return fallback.length > 80 ? fallback.slice(0, 80) + '…' : fallback;
 }
 
 /**
