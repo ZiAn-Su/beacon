@@ -79,6 +79,12 @@ const en: Dict = {
   "ask.youAnswered": "You answered:",
   "ask.dismiss": "Dismiss question",
 
+  "contactReq.tag": "Contact request",
+  "contactReq.body": "{from} wants permission to message {to}.",
+  "contactReq.reason": "Reason: {reason}",
+  "contactReq.approve": "Allow",
+  "contactReq.deny": "Deny",
+
   "composer.answer": "Type your answer — Enter to send",
   "composer.reply": "Reply to the agent — Enter to send",
   "composer.message": "Message the agent — Enter to send",
@@ -290,6 +296,12 @@ const zh: Dict = {
   "ask.needs": "需要你决策",
   "ask.youAnswered": "你的回答：",
   "ask.dismiss": "忽略该问题",
+
+  "contactReq.tag": "联系申请",
+  "contactReq.body": "「{from}」申请联系「{to}」。",
+  "contactReq.reason": "理由：{reason}",
+  "contactReq.approve": "允许",
+  "contactReq.deny": "拒绝",
 
   "composer.answer": "输入你的回答 —— 回车发送",
   "composer.reply": "回复 Agent —— 回车发送",

@@ -3,6 +3,24 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.6.2] - 2026-06-20
+
+### 新增 —— 可见范围 + 智能体主动申请联系(授权双向化)
+
+把「智能体间通信授权」从「只有人手工配」升级为「有默认范围、agent 能申请、人审批」。
+
+- **默认可见范围 = 同一工作目录**:`isVisibleScope`(同目录或嵌套)。agent 查地址簿
+  (`list_agents` / `GET /api/agents?visibleTo=`)只看得到可见范围内的同伴,不再枚举全部名册。
+- **三态裁决**:`resolvePeerPermission` → `allow / deny / approval`。逐对 Grant > 档位
+  (autonomous 放行 / restricted 拒绝)> 可见性闸门 > (trusted 放行 / **standard 要审批**)。
+  范围外只有显式 allow Grant 能触达。
+- **智能体主动申请**:`contact_requests` 表 + `request_contact` MCP 工具 +
+  `POST /api/sessions/:id/request-contact`。agent 对可见但未授权的对象发起申请 → 以一条
+  **联系申请** ask 弹给监护人(`允许 / 拒绝`)→ 批准即固化为 allow Grant,申请方解除阻塞。
+  `notify_agent` / `ask_agent` 命中未授权会提示去 `request_contact`。
+- **前端**:联系申请在对话里渲染为本地化审批卡(申请人 → 目标 + 理由 + 允许/拒绝)。
+- 修复:进程内 MCP(托管 HTTP)此前**绕过**了 peer 授权检查,现已与 REST 路由一致。
+
 ## [0.6.1] - 2026-06-20
 
 ### 新增 —— 微信式「通讯录」整页视图(人侧)

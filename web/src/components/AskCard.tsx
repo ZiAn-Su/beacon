@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Check, HelpCircle, X } from "lucide-react";
+import { Check, HelpCircle, Users, X } from "lucide-react";
 import type { Message } from "../types";
 import { useStore } from "../lib/store";
-import { classNames } from "../lib/format";
+import { classNames, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -13,10 +13,28 @@ interface Props {
 
 export function AskCard({ ask, answered, answerText }: Props) {
   const { t } = useI18n();
-  const { send, cancelAsk } = useStore();
+  const { send, cancelAsk, sessions } = useStore();
   const [busy, setBusy] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const options = ask.meta?.options ?? [];
+
+  // A contact request renders a localized approval card; the option tokens stay
+  // 'approve' / 'deny' (what the backend matches) but the buttons are localized.
+  const cr = ask.meta?.contactRequest;
+  const nameOf = (id: string) => {
+    const s = sessions.find((x) => x.id === id);
+    return s ? sessionName(s, pathBase(s.workPath) || s.runtime) : id.slice(0, 8);
+  };
+  const optionLabel = (opt: string) =>
+    cr ? (opt === "approve" ? t("contactReq.approve") : t("contactReq.deny")) : opt;
+  const headerTag = answered
+    ? t("ask.resolved")
+    : cr
+      ? t("contactReq.tag")
+      : t("ask.needs");
+  const bodyText = cr
+    ? t("contactReq.body", { from: nameOf(cr.fromId), to: nameOf(cr.toId) })
+    : ask.text;
 
   if (dismissed) return null;
 
@@ -53,7 +71,7 @@ export function AskCard({ ask, answered, answerText }: Props) {
             }`,
           }}
         >
-          {answered ? <Check size={16} /> : <HelpCircle size={16} />}
+          {answered ? <Check size={16} /> : cr ? <Users size={16} /> : <HelpCircle size={16} />}
         </div>
 
         <div className="min-w-0 flex-1">
@@ -70,7 +88,7 @@ export function AskCard({ ask, answered, answerText }: Props) {
                 }`,
               }}
             >
-              {answered ? t("ask.resolved") : t("ask.needs")}
+              {headerTag}
             </span>
           </div>
 
@@ -78,8 +96,17 @@ export function AskCard({ ask, answered, answerText }: Props) {
             className="mt-2 text-[14.5px] leading-relaxed text-strong"
             style={{ whiteSpace: "pre-wrap" }}
           >
-            {ask.text}
+            {bodyText}
           </div>
+
+          {cr?.reason ? (
+            <div
+              className="mt-1.5 text-[12.5px] italic"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {t("contactReq.reason", { reason: cr.reason })}
+            </div>
+          ) : null}
 
           {answered ? (
             <div
@@ -144,7 +171,7 @@ export function AskCard({ ask, answered, answerText }: Props) {
                     }
                   }}
                 >
-                  {opt}
+                  {optionLabel(opt)}
                 </button>
               ))}
             </div>

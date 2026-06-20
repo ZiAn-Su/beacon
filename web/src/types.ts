@@ -40,7 +40,12 @@ export interface Message {
   // Originating session for an agent->agent "peer" message; null otherwise.
   fromSessionId: string | null;
   askId: string | null;
-  meta: { options?: string[] } | null;
+  meta: {
+    options?: string[];
+    // Present when this ask backs an agent-initiated contact request; the UI
+    // renders a localized approval card and the approve/deny option tokens.
+    contactRequest?: { fromId: string; toId: string; reason?: string | null };
+  } | null;
   createdAt: number;
   deliveredAt: number | null;
 }
