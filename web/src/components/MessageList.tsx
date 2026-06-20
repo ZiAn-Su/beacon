@@ -6,9 +6,10 @@ import { useI18n } from "../lib/i18n";
 interface Props {
   messages: Message[];
   loading: boolean;
+  currentSessionId: string;
 }
 
-export function MessageList({ messages, loading }: Props) {
+export function MessageList({ messages, loading, currentSessionId }: Props) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
 
@@ -61,6 +62,7 @@ export function MessageList({ messages, loading }: Props) {
         ) : (
           <GroupedList
             messages={messages}
+            currentSessionId={currentSessionId}
             pendingAskIds={pendingAskIds}
             resolvedAnswers={resolvedAnswers}
           />
@@ -72,10 +74,12 @@ export function MessageList({ messages, loading }: Props) {
 
 function GroupedList({
   messages,
+  currentSessionId,
   pendingAskIds,
   resolvedAnswers,
 }: {
   messages: Message[];
+  currentSessionId: string;
   pendingAskIds: Set<string>;
   resolvedAnswers: Record<string, string>;
 }) {
@@ -85,6 +89,7 @@ function GroupedList({
         <MessageItem
           key={m.id}
           message={m}
+          currentSessionId={currentSessionId}
           pendingAskIds={pendingAskIds}
           resolvedAnswers={resolvedAnswers}
           isLast={i === messages.length - 1}

@@ -95,7 +95,11 @@ export function Conversation({
                 icon={<MessageSquareText size={22} />}
               />
             ) : (
-              <MessageList messages={messages} loading={loadingMessages} />
+              <MessageList
+                messages={messages}
+                loading={loadingMessages}
+                currentSessionId={session.id}
+              />
             )}
           </div>
           <Composer session={session} pendingAsk={pendingAsk} onSend={handleSend} />

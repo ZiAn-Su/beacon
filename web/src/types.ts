@@ -21,7 +21,7 @@ export interface Session {
 }
 
 export type MsgDirection = "agent" | "human";
-export type MsgKind = "notify" | "ask" | "answer" | "chat" | "status";
+export type MsgKind = "notify" | "ask" | "answer" | "chat" | "status" | "peer";
 
 export interface Message {
   id: string;
@@ -29,6 +29,8 @@ export interface Message {
   direction: MsgDirection;
   kind: MsgKind;
   text: string;
+  // Originating session for an agent->agent "peer" message; null otherwise.
+  fromSessionId: string | null;
   askId: string | null;
   meta: { options?: string[] } | null;
   createdAt: number;

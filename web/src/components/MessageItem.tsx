@@ -1,11 +1,15 @@
-import { Bell, Bot, Check, User2 } from "lucide-react";
+import { ArrowLeftRight, Bell, Bot, Check, User2 } from "lucide-react";
 import type { Message } from "../types";
 import { absoluteTime, shortTime } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import { useStore } from "../lib/store";
 import { AskCard } from "./AskCard";
 
 interface Props {
   message: Message;
+  // The session whose thread is being viewed — used to tell whether a peer
+  // message is incoming (sent to me) or outgoing (sent by me to another agent).
+  currentSessionId: string;
   // Map of askId -> the human answer (or empty string) for resolved asks.
   resolvedAnswers: Record<string, string>;
   // Whether a given ask is still pending (i.e. no human answer yet).
@@ -16,13 +20,35 @@ interface Props {
 
 export function MessageItem({
   message,
+  currentSessionId,
   resolvedAnswers,
   pendingAskIds,
   isLast,
 }: Props) {
   const { t } = useI18n();
+  const { sessions } = useStore();
   if (message.kind === "status") {
     return <StatusLine text={message.text} />;
+  }
+
+  if (message.kind === "peer") {
+    const outgoing = message.fromSessionId === currentSessionId;
+    const otherId = outgoing ? message.sessionId : message.fromSessionId;
+    const other = sessions.find((s) => s.id === otherId);
+    const name = other?.title || other?.task || (otherId ? otherId.slice(0, 8) : "agent");
+    const label = outgoing
+      ? t("msg.peerTo", { name })
+      : t("msg.peerFrom", { name });
+    return (
+      <PeerBubble
+        text={message.text}
+        ts={message.createdAt}
+        label={label}
+        outgoing={outgoing}
+        isQuestion={!!message.askId}
+        questionLabel={t("msg.peerQuestion")}
+      />
+    );
   }
 
   if (message.kind === "ask" && message.askId) {
@@ -170,6 +196,83 @@ function NotifyBubble({ text, ts }: { text: string; ts: number }) {
       >
         {shortTime(ts)}
       </time>
+    </div>
+  );
+}
+
+function PeerBubble({
+  text,
+  ts,
+  label,
+  outgoing,
+  isQuestion,
+  questionLabel,
+}: {
+  text: string;
+  ts: number;
+  label: string;
+  outgoing: boolean;
+  isQuestion: boolean;
+  questionLabel: string;
+}) {
+  return (
+    <div className={`flex ${outgoing ? "justify-end" : "justify-start"}`}>
+      <div
+        className="flex max-w-[80%] items-start gap-2.5 rounded-xl px-3 py-2.5 text-[13px] leading-relaxed"
+        style={{
+          background: "var(--surface-card)",
+          border: `1px dashed ${outgoing ? "var(--accent-soft)" : "var(--border)"}`,
+          color: "var(--text-secondary)",
+        }}
+      >
+        <span
+          className="mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full"
+          style={{
+            background: "var(--surface-hover)",
+            color: "var(--accent)",
+            border: "1px solid var(--border)",
+          }}
+          aria-hidden
+        >
+          <ArrowLeftRight size={9} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-1.5">
+            <span
+              className="text-[11px] font-semibold"
+              style={{ color: "var(--accent)" }}
+            >
+              {label}
+            </span>
+            {isQuestion && (
+              <span
+                className="rounded px-1 py-0.5 text-[9.5px] uppercase tracking-wide"
+                style={{
+                  background: "var(--surface-hover)",
+                  color: "var(--text-muted)",
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {questionLabel}
+              </span>
+            )}
+          </span>
+          <span
+            className="mt-1 block"
+            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text)" }}
+          >
+            {text}
+          </span>
+        </span>
+        <time
+          dateTime={new Date(ts).toISOString()}
+          title={absoluteTime(ts)}
+          className="mt-0.5 shrink-0 text-[10.5px] tabular-nums"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {shortTime(ts)}
+        </time>
+      </div>
     </div>
   );
 }

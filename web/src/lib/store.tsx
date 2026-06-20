@@ -169,24 +169,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
       case "message": {
         const m = e.message;
+        // A peer (agent->agent) message lives on the recipient's thread but must
+        // also surface on the sender's thread (mirrors the backend's
+        // `sessionId OR fromSessionId` query), so the sender's open conversation
+        // updates live too.
+        const threadIds = [m.sessionId];
+        if (m.kind === "peer" && m.fromSessionId && m.fromSessionId !== m.sessionId) {
+          threadIds.push(m.fromSessionId);
+        }
         setMessagesBySession((prev) => {
-          const list = prev[m.sessionId] ?? [];
-          const idx = list.findIndex((x) => x.id === m.id);
-          if (idx >= 0) {
-            // Update existing message in place (e.g. deliveredAt newly set).
-            const next = list.slice();
-            next[idx] = m;
-            return { ...prev, [m.sessionId]: next };
+          let next = prev;
+          for (const key of threadIds) {
+            const list = next[key] ?? [];
+            const idx = list.findIndex((x) => x.id === m.id);
+            if (idx >= 0) {
+              // Update existing message in place (e.g. deliveredAt newly set).
+              const copy = list.slice();
+              copy[idx] = m;
+              next = { ...next, [key]: copy };
+            } else {
+              next = { ...next, [key]: [...list, m] };
+            }
           }
-          return { ...prev, [m.sessionId]: [...list, m] };
+          return next;
         });
-        // Bump the session's updatedAt so contacts re-sort naturally.
+        // Bump each involved session's updatedAt so contacts re-sort naturally.
         setSessions((prev) => {
-          const idx = prev.findIndex((s) => s.id === m.sessionId);
-          if (idx < 0) return prev;
-          const next = prev.slice();
-          const s = next[idx]!;
-          next[idx] = { ...s, updatedAt: Math.max(s.updatedAt, m.createdAt) };
+          let next = prev;
+          for (const key of threadIds) {
+            const idx = next.findIndex((s) => s.id === key);
+            if (idx < 0) continue;
+            if (next === prev) next = prev.slice();
+            const s = next[idx]!;
+            next[idx] = { ...s, updatedAt: Math.max(s.updatedAt, m.createdAt) };
+          }
           return next;
         });
         // Unread tracking: only count agent->human messages (notify/ask/chat),
