@@ -62,9 +62,16 @@ const renderInboxLine = (m) => {
 };
 
 // A channel message in the merged inbox: tagged with the channel and who posted
-// (a peer agent, or the human guardian).
+// (a peer agent, or the human guardian). Asks/answers are flagged so the agent
+// knows a group question is waiting and how to answer it.
 const renderChannelLine = (m) => {
   const who = m.fromSessionId ? `agent ${m.fromSessionId}` : 'guardian';
+  if (m.kind === 'ask' && m.askId) {
+    return `[#${m.channelName} · ${who} ASKS] ${m.text}  (answer with answer-channel ${m.channelId} ${m.askId} <text>)`;
+  }
+  if (m.kind === 'answer') {
+    return `[#${m.channelName} · ${who} answered] ${m.text}`;
+  }
   return `[#${m.channelName} · ${who}] ${m.text}`;
 };
 
@@ -169,6 +176,28 @@ try {
     const channelId = args[0] ?? '';
     await api(`/api/sessions/${id}/channel-post`, { channelId, text: args.slice(1).join(' ') });
     console.log('posted to channel');
+  } else if (cmd === 'ask-channel') {
+    const id = await ensureSession();
+    const channelId = args[0] ?? '';
+    const question = args[1] ?? '';
+    const options = args.slice(2);
+    const { askId } = await api(`/api/sessions/${id}/channel-ask`, {
+      channelId,
+      question,
+      options: options.length ? options : undefined,
+    });
+    process.stderr.write('waiting for a channel member to answer…\n');
+    for (;;) {
+      const { ask } = await api(`/api/asks/${askId}/wait?timeoutMs=25000`);
+      if (ask.status === 'answered') { console.log(ask.answer ?? ''); break; }
+      if (ask.status === 'cancelled') { console.log('(the question was dismissed without an answer)'); break; }
+    }
+  } else if (cmd === 'answer-channel') {
+    const id = await ensureSession();
+    const channelId = args[0] ?? '';
+    const askId = args[1] ?? '';
+    await api(`/api/sessions/${id}/channel-answer`, { channelId, askId, text: args.slice(2).join(' ') });
+    console.log('answered the channel');
   } else if (cmd === 'agents') {
     const id = await ensureSession();
     const { agents } = await api(`/api/agents?visibleTo=${encodeURIComponent(id)}`);
@@ -228,7 +257,7 @@ try {
       }
     }
   } else {
-    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...] | channels | channel-post <channelId> <msg...>>');
+    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...] | channels | channel-post <channelId> <msg...> | ask-channel <channelId> <q> [opt...] | answer-channel <channelId> <askId> <ans...>>');
     process.exit(1);
   }
 } catch (e) {

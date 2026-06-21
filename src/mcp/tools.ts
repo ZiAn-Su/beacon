@@ -60,9 +60,21 @@ export interface AgentOps {
     params: { workPath: string; runtime?: string; name?: string | null; task?: string | null },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
   // Group channels: a channel fans a message out to all its members (other
-  // agents + the human guardian). v1 is broadcast chat.
+  // agents + the human guardian). v1 is broadcast chat; v2 adds blocking asks.
   listChannels(forId: string): Promise<{ id: string; name: string }[]>;
   postChannel(fromId: string, channelId: string, text: string): Promise<void>;
+  askChannel(
+    fromId: string,
+    channelId: string,
+    question: string,
+    options?: string[] | null,
+  ): Promise<{ askId: string }>;
+  answerChannel(
+    fromId: string,
+    channelId: string,
+    askId: string,
+    text: string,
+  ): Promise<void>;
   channelInbox(
     id: string,
     after: number,
@@ -72,6 +84,8 @@ export interface AgentOps {
       channelName: string;
       fromSessionId: string | null;
       text: string;
+      kind: 'chat' | 'ask' | 'answer';
+      askId: string | null;
       createdAt: number;
     }[]
   >;
@@ -553,6 +567,78 @@ export function registerBeaconTools(
       return { content: [{ type: 'text', text: 'Posted to channel.' }] };
     },
   );
+
+  server.registerTool(
+    'ask_channel',
+    {
+      title: 'Ask a group channel and wait for an answer',
+      description:
+        'Post a BLOCKING question to a channel you belong to and wait until any member — ' +
+        'another agent or the human guardian — answers. First answer wins. Use channel_id ' +
+        'from list_channels. Provide options for a quick decision when applicable.',
+      inputSchema: {
+        channel_id: z.string().describe('Target channel id (from list_channels)'),
+        question: z.string().describe('The question to ask the group'),
+        options: z
+          .array(z.string())
+          .optional()
+          .describe('Optional quick-reply choices a member can pick'),
+      },
+    },
+    async ({ channel_id, question, options }) => {
+      const id = await ensure();
+      let askId: string;
+      try {
+        ({ askId } = await ops.askChannel(id, channel_id, question, options));
+      } catch (e) {
+        return {
+          content: [
+            { type: 'text', text: `Could not ask: ${e instanceof Error ? e.message : String(e)}` },
+          ],
+        };
+      }
+      for (;;) {
+        const ask = await ops.waitAsk(askId, 25000);
+        if (ask.status === 'answered') {
+          return { content: [{ type: 'text', text: ask.answer ?? '' }] };
+        }
+        if (ask.status === 'cancelled') {
+          return {
+            content: [{ type: 'text', text: '(The question was dismissed without an answer.)' }],
+          };
+        }
+        // still pending — loop and wait again
+      }
+    },
+  );
+
+  server.registerTool(
+    'answer_channel',
+    {
+      title: 'Answer a pending question in a channel',
+      description:
+        'Reply to a channel question that showed up in your inbox (kind ASKS, with an ask_id). ' +
+        'First answer wins and unblocks the asker. Use the channel_id and ask_id from that inbox entry.',
+      inputSchema: {
+        channel_id: z.string().describe('The channel id from the inbox question'),
+        ask_id: z.string().describe('The ask_id from the inbox question'),
+        answer: z.string().describe('Your answer to the group'),
+      },
+    },
+    async ({ channel_id, ask_id, answer }) => {
+      const id = await ensure();
+      try {
+        await ops.answerChannel(id, channel_id, ask_id, answer);
+      } catch (e) {
+        return {
+          content: [
+            { type: 'text', text: `Could not answer: ${e instanceof Error ? e.message : String(e)}` },
+          ],
+        };
+      }
+      return { content: [{ type: 'text', text: 'Answered the channel.' }] };
+    },
+  );
 }
 
 /**
@@ -602,11 +688,23 @@ function renderInboxLine(m: {
  * from 1:1 chat in the same inbox view.
  */
 function renderChannelLine(m: {
+  channelId: string;
   channelName: string;
   fromSessionId: string | null;
   text: string;
+  kind: 'chat' | 'ask' | 'answer';
+  askId: string | null;
 }): string {
   const who = m.fromSessionId ? `agent ${m.fromSessionId}` : 'guardian';
+  if (m.kind === 'ask' && m.askId) {
+    return (
+      `[#${m.channelName} · ${who} ASKS] ${m.text}  ` +
+      `(answer with answer_channel channel_id=${m.channelId} ask_id=${m.askId})`
+    );
+  }
+  if (m.kind === 'answer') {
+    return `[#${m.channelName} · ${who} answered] ${m.text}`;
+  }
   return `[#${m.channelName} · ${who}] ${m.text}`;
 }
 
@@ -753,6 +851,19 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         body: JSON.stringify({ channelId, text }),
       });
     },
+    async askChannel(fromId, channelId, question, options) {
+      const { askId } = await api<{ askId: string }>(`/api/sessions/${fromId}/channel-ask`, {
+        method: 'POST',
+        body: JSON.stringify({ channelId, question, options: options ?? undefined }),
+      });
+      return { askId };
+    },
+    async answerChannel(fromId, channelId, askId, text) {
+      await api(`/api/sessions/${fromId}/channel-answer`, {
+        method: 'POST',
+        body: JSON.stringify({ channelId, askId, text }),
+      });
+    },
     async channelInbox(id, after) {
       const { messages } = await api<{
         messages: {
@@ -760,6 +871,8 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
           channelName: string;
           fromSessionId: string | null;
           text: string;
+          kind: 'chat' | 'ask' | 'answer';
+          askId: string | null;
           createdAt: number;
         }[];
       }>(`/api/sessions/${id}/channel-inbox?after=${after}`);

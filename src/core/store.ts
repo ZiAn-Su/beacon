@@ -21,6 +21,7 @@ import type {
   ContactRequest,
   Channel,
   ChannelMessage,
+  ChannelMsgKind,
 } from './types';
 import { SESSION_STATUSES } from './types';
 import { getSettings } from './settings';
@@ -165,6 +166,11 @@ ensureColumn('sessions', 'trustTier', 'TEXT');
 ensureColumn('sessions', 'nativeSessionId', 'TEXT');
 // Agent self-introduction (bio). NULL on old rows; defaulted at read time.
 ensureColumn('sessions', 'description', 'TEXT');
+// Group-ask (P6 v2): channel messages gain a kind + askId so a question posted
+// to a channel can block the asker until a member answers. Old rows are plain
+// 'chat' with no ask.
+ensureColumn('channel_messages', 'kind', "TEXT NOT NULL DEFAULT 'chat'");
+ensureColumn('channel_messages', 'askId', 'TEXT');
 // Admission timestamp. NULL means "pending the owner's decision" (quarantined).
 // When this column is first added, existing rows predate admission and must be
 // treated as already admitted, so backfill them once at migration time —
@@ -1489,8 +1495,8 @@ const deleteParticipantsForSession = db.prepare(
   `DELETE FROM channel_participants WHERE sessionId = ?`,
 );
 const insertChannelMessage = db.prepare(
-  `INSERT INTO channel_messages (id, channelId, fromSessionId, text, createdAt)
-   VALUES (@id, @channelId, @fromSessionId, @text, @createdAt)`,
+  `INSERT INTO channel_messages (id, channelId, fromSessionId, text, kind, askId, createdAt)
+   VALUES (@id, @channelId, @fromSessionId, @text, @kind, @askId, @createdAt)`,
 );
 const selectChannelMessages = db.prepare(
   `SELECT * FROM channel_messages WHERE channelId = ? ORDER BY createdAt ASC`,
@@ -1578,6 +1584,7 @@ export function postChannelMessage(
   channelId: string,
   fromSessionId: string | null,
   text: string,
+  opts?: { kind?: ChannelMsgKind; askId?: string | null },
 ): ChannelMessage {
   if (!getChannel(channelId)) throw new Error('channel not found');
   const m: ChannelMessage = {
@@ -1585,12 +1592,68 @@ export function postChannelMessage(
     channelId,
     fromSessionId: fromSessionId ?? null,
     text,
+    kind: opts?.kind ?? 'chat',
+    askId: opts?.askId ?? null,
     createdAt: now(),
   };
   insertChannelMessage.run(m);
   if (fromSessionId) touchSeen(fromSessionId);
   bus.emit('channelMessage', m);
   return m;
+}
+
+/**
+ * An agent posts a BLOCKING question to a channel. Reuses the ask machinery: the
+ * asker waits on the returned ask (waitForAsk) until any other member answers.
+ * The question is fanned out as a channel message tagged kind='ask' + askId.
+ */
+export function createChannelAsk(
+  channelId: string,
+  fromSessionId: string,
+  question: string,
+  options: string[] | null,
+): { ask: Ask; message: ChannelMessage } {
+  if (!getChannel(channelId)) throw new Error('channel not found');
+  if (!isParticipant(channelId, fromSessionId)) throw new Error('not a participant of this channel');
+  const ask: Ask = {
+    id: randomUUID(),
+    sessionId: fromSessionId,
+    question,
+    options,
+    status: 'pending',
+    answer: null,
+    createdAt: now(),
+    answeredAt: null,
+  };
+  insertAsk.run({ ...ask, options: ask.options ? JSON.stringify(ask.options) : null });
+  setStatus(fromSessionId, 'waiting');
+  const message = postChannelMessage(channelId, fromSessionId, question, { kind: 'ask', askId: ask.id });
+  return { ask, message };
+}
+
+/**
+ * Answer a pending channel ask. First answer wins: it resolves the ask, unblocks
+ * the asker (waitForAsk), and is posted to the channel tagged kind='answer'. A
+ * late answer (already resolved) is posted as plain chat so it still shows.
+ * `fromSessionId` is the answering agent, or null for the human (owner).
+ */
+export function answerChannelAsk(
+  channelId: string,
+  askId: string,
+  fromSessionId: string | null,
+  text: string,
+): ChannelMessage {
+  const ask = getAsk(askId);
+  if (!ask || ask.status !== 'pending') {
+    // Lost the race (or unknown ask): keep the words as a normal group post.
+    return postChannelMessage(channelId, fromSessionId, text);
+  }
+  const message = postChannelMessage(channelId, fromSessionId, text, { kind: 'answer', askId });
+  updateAskAnswer.run({ id: askId, answer: text, answeredAt: now() });
+  const asker = getSession(ask.sessionId);
+  if (asker && asker.status === 'waiting') setStatus(ask.sessionId, 'working');
+  flushWaiters(getAsk(askId)!);
+  return message;
 }
 
 export function channelMessages(channelId: string): ChannelMessage[] {
@@ -1602,16 +1665,31 @@ export function channelMessages(channelId: string): ChannelMessage[] {
  * `after`, excluding its own posts. Used by the agent-facing check_inbox so a
  * polling agent picks up group traffic alongside 1:1 chat.
  */
-export function channelInbox(
-  sessionId: string,
-  after: number,
-): { channelId: string; channelName: string; fromSessionId: string | null; text: string; createdAt: number }[] {
+export interface ChannelInboxItem {
+  channelId: string;
+  channelName: string;
+  fromSessionId: string | null;
+  text: string;
+  kind: ChannelMsgKind;
+  askId: string | null;
+  createdAt: number;
+}
+
+export function channelInbox(sessionId: string, after: number): ChannelInboxItem[] {
   const channels = channelsForSession(sessionId);
-  const out: { channelId: string; channelName: string; fromSessionId: string | null; text: string; createdAt: number }[] = [];
+  const out: ChannelInboxItem[] = [];
   for (const c of channels) {
     for (const m of channelMessages(c.id)) {
       if (m.createdAt > after && m.fromSessionId !== sessionId) {
-        out.push({ channelId: c.id, channelName: c.name, fromSessionId: m.fromSessionId, text: m.text, createdAt: m.createdAt });
+        out.push({
+          channelId: c.id,
+          channelName: c.name,
+          fromSessionId: m.fromSessionId,
+          text: m.text,
+          kind: m.kind,
+          askId: m.askId,
+          createdAt: m.createdAt,
+        });
       }
     }
   }

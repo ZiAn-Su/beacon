@@ -143,12 +143,20 @@ export interface Channel {
   createdAt: number;
 }
 
+// Kind of a channel message. 'chat' is a plain broadcast post; 'ask' is a
+// blocking question posted to the group (links to an Ask, the asker waits);
+// 'answer' is the reply that resolved a channel ask (first answer wins).
+export type ChannelMsgKind = 'chat' | 'ask' | 'answer';
+
 // A message in a channel. `fromSessionId` is the posting agent, or null when the
-// human (owner) posted it.
+// human (owner) posted it. `kind`/`askId` carry the group-ask semantics; older
+// rows default to 'chat' with no askId.
 export interface ChannelMessage {
   id: string;
   channelId: string;
   fromSessionId: string | null;
   text: string;
+  kind: ChannelMsgKind;
+  askId: string | null;
   createdAt: number;
 }

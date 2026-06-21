@@ -149,6 +149,22 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       }
       store.postChannelMessage(channelId, fromId, text);
     },
+    async askChannel(fromId, channelId, question, options) {
+      if (!store.getChannel(channelId)) throw new Error('channel not found');
+      // createChannelAsk re-checks membership; surface a clean error first.
+      if (!store.isParticipant(channelId, fromId)) {
+        throw new Error('not a participant of this channel');
+      }
+      const { ask } = store.createChannelAsk(channelId, fromId, question, options ?? null);
+      return { askId: ask.id };
+    },
+    async answerChannel(fromId, channelId, askId, text) {
+      if (!store.getChannel(channelId)) throw new Error('channel not found');
+      if (!store.isParticipant(channelId, fromId)) {
+        throw new Error('not a participant of this channel');
+      }
+      store.answerChannelAsk(channelId, askId, fromId, text);
+    },
     async channelInbox(id, after) {
       return store.channelInbox(id, after);
     },

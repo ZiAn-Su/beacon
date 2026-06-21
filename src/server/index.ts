@@ -812,6 +812,18 @@ app.post('/api/channels/:id/messages', (req: Request, res: Response) => {
   ok(res, { message: store.postChannelMessage(id, null, text) });
 });
 
+// Owner answers a pending channel ask (an agent asked the group). First answer
+// wins; this unblocks the asker. body { askId, text }.
+app.post('/api/channels/:id/answer', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  const askId = String(req.body?.askId ?? '');
+  const text = String(req.body?.text ?? '');
+  if (!askId) { res.status(400).json({ error: 'askId is required' }); return; }
+  if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  ok(res, { message: store.answerChannelAsk(id, askId, null, text) });
+});
+
 // --- south (agent) channel access ---
 // An agent posts to a channel it belongs to. body { channelId, text }.
 app.post('/api/sessions/:id/channel-post', (req: Request, res: Response) => {
@@ -827,6 +839,44 @@ app.post('/api/sessions/:id/channel-post', (req: Request, res: Response) => {
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
   store.touchSeen(id);
   ok(res, { message: store.postChannelMessage(channelId, id, text) });
+});
+
+// An agent posts a BLOCKING question to a channel it belongs to. Returns askId;
+// the agent then long-polls GET /api/asks/:askId/wait like any other ask.
+// body { channelId, question, options? }.
+app.post('/api/sessions/:id/channel-ask', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const channelId = String(req.body?.channelId ?? '');
+  const question = String(req.body?.question ?? '');
+  const options = Array.isArray(req.body?.options) ? req.body.options.map(String) : null;
+  if (!store.getChannel(channelId)) return channelNotFound(res);
+  if (!store.isParticipant(channelId, id)) {
+    res.status(403).json({ error: 'not a participant of this channel' }); return;
+  }
+  if (!question.trim()) { res.status(400).json({ error: 'question is required' }); return; }
+  store.touchSeen(id);
+  const { ask } = store.createChannelAsk(channelId, id, question, options);
+  ok(res, { askId: ask.id });
+});
+
+// An agent answers a pending channel ask. body { channelId, askId, text }.
+app.post('/api/sessions/:id/channel-answer', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const channelId = String(req.body?.channelId ?? '');
+  const askId = String(req.body?.askId ?? '');
+  const text = String(req.body?.text ?? '');
+  if (!store.getChannel(channelId)) return channelNotFound(res);
+  if (!store.isParticipant(channelId, id)) {
+    res.status(403).json({ error: 'not a participant of this channel' }); return;
+  }
+  if (!askId) { res.status(400).json({ error: 'askId is required' }); return; }
+  if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  store.touchSeen(id);
+  ok(res, { message: store.answerChannelAsk(channelId, askId, id, text) });
 });
 
 // Channels an agent belongs to (for its addressing/list view).
