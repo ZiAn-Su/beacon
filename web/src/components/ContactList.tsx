@@ -16,9 +16,11 @@ interface Props {
   onOpenDirectory?: () => void;
 }
 
-type GroupKey = "waiting" | "active" | "done";
+type GroupKey = "pending" | "waiting" | "active" | "done";
 
-const GROUP_ORDER: GroupKey[] = ["active", "done", "waiting"];
+// Pending (quarantined, awaiting the owner's admission) sits first — it needs a
+// decision before the agent can do anything.
+const GROUP_ORDER: GroupKey[] = ["pending", "active", "done", "waiting"];
 
 function groupForStatus(status: Session["status"]): GroupKey {
   if (status === "waiting") return "waiting";
@@ -82,19 +84,23 @@ export function ContactList({
     }
   }
 
-  // Sort by updatedAt desc within each group, then group.
+  // Sort by updatedAt desc within each group, then group. A quarantined agent
+  // (admittedAt == null) goes to "pending" regardless of its status.
   const byGroup: Record<GroupKey, Session[]> = {
+    pending: [],
     active: [],
     done: [],
     waiting: [],
   };
   const sorted = [...active].sort((a, b) => b.updatedAt - a.updatedAt);
   for (const s of sorted) {
-    byGroup[groupForStatus(s.status)].push(s);
+    const g = s.admittedAt == null ? "pending" : groupForStatus(s.status);
+    byGroup[g].push(s);
   }
   const archivedSorted = [...archived].sort((a, b) => b.updatedAt - a.updatedAt);
 
   const waitingCount = byGroup.waiting.length;
+  const pendingCount = byGroup.pending.length;
 
   const renderCard = (s: Session) => (
     <li key={s.id}>
@@ -156,6 +162,19 @@ export function ContactList({
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
+          {pendingCount > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums"
+              style={{
+                color: "#fff",
+                background: "var(--accent)",
+                border: "1px solid var(--accent)",
+              }}
+              title={t("contacts.group.pending")}
+            >
+              {t("contacts.pendingBadge", { n: pendingCount })}
+            </span>
+          )}
           {waitingCount > 0 && (
             <span
               className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums"
