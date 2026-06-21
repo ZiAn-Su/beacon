@@ -1,85 +1,66 @@
 # Beacon
 
-**An agent-native instant-messaging platform.** Humans and AI agents talk over a
-neutral, runtime-agnostic bus: you message a specific agent, and an agent can
-reach you **on its own initiative** while it works, only when it judges it worth
-your attention.
+### Your agents text you.
 
-Unlike a chatbot (human-driven, one question at a time), an agent runs long tasks
-autonomously and contacts you with two clear semantics:
+**An open, agent-native messaging platform.** Your AI agents run long tasks on their
+own — and reach *you* the moment they need a decision or want to share progress.
+Not another chatbox you have to poke: a neutral bus where the **agent** starts the
+conversation, only when it judges it worth your attention.
+
+Two semantics, borrowed from how a good teammate works:
 
 - **`notify`** — a non-blocking heads-up; the agent keeps working.
-- **`ask`** — a blocking question; the agent's task pauses until you answer.
+- **`ask`** — a *blocking* question; the agent's task pauses until you answer.
 
-Each agent task is its own **session** (its own work path / context), shown to you
-as a contact with a live **status** (working / waiting / idle / done).
+Works with **Claude Code, Codex, or any runtime that can run a command**.
+Self-hosted. MIT. Each agent task shows up as a contact with a live status
+(working / waiting / idle / done).
 
-**English** · [中文说明](#beacon-中文)
+`MIT licensed` · `built for MCP + agents` · **English** · [中文说明](#beacon-中文)
+
+> **▶ 40-second demo** *(gif coming)* — an agent works autonomously, your screen
+> lights up with a `notify`, it hits an `ask` and **blocks**, you tap an answer, it
+> continues. Want to see it right now with no agent to set up? `npm run sim`.
 
 ---
 
-## Quick start
+## Quick start — two commands
 
 ```bash
 npm install                 # backend deps (repo root)
-cd web && npm install && cd ..
-
-npm start                   # build the web UI + serve UI+API+WS on one port
-                            # → http://127.0.0.1:4319
+npm start                   # installs + builds the web UI, then serves UI+API+WS
+                            # on one port → http://127.0.0.1:4319
 ```
 
+`npm start` handles the web UI install/build for you — no separate `cd web` step.
+
 Open **http://127.0.0.1:4319**. It starts empty — connect an agent (below). To see
-it in motion without a real agent:
+the whole notify/ask loop in motion **without setting up a real agent**, leave the
+server running and in a second terminal:
 
 ```bash
 npm run sim                 # a simulated agent: reports progress, then blocks on a
                             # question; answer it in the UI and it continues
 ```
 
-## Connect an agent (two ways)
+## Connect an agent
 
-### 1) Hosted MCP — recommended, one global command
+完整接入步骤、命令与工具清单见 **[`docs/connect-agent.md`](docs/connect-agent.md)**(单一事实源)。两种主要方式:
 
-The platform hosts an MCP server over HTTP at `/mcp`. Onboarding is a single
-global, path-free command — and it **never changes when you update Beacon**,
-because the URL is the contract:
+- **托管式 MCP(推荐)** — 一条全局命令,平台升级命令不变(URL 即契约)。
+- **零配置 skill(给 Claude Code,无需 MCP)** — 装一次,任意会话可用。
 
-```bash
-claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
-```
-
-`-s user` registers it for every project at once. Restart Claude Code and `beacon`
-shows up in `/mcp` with five tools: `register_session`, `notify_human`,
-`ask_human`, `update_status`, `check_inbox`.
-
-### 2) Zero-config skill — for Claude Code, no MCP
-
-No MCP, no restart, no absolute paths. Install once, use in any session:
+Quick start(完整版见上链):
 
 ```bash
-cp -r skill/beacon ~/.claude/skills/beacon
-# Windows: copy skill\beacon to %USERPROFILE%\.claude\skills\beacon
+claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp   # 托管 MCP
+cp -r skill/beacon ~/.claude/skills/beacon                                  # 零配置 skill
 ```
 
-Then the agent talks to you via the bundled CLI:
-
-```bash
-node <skill>/beacon.mjs register "What I'm working on"
-node <skill>/beacon.mjs notify   "progress update..."
-node <skill>/beacon.mjs ask      "Proceed?" "Approve" "Hold"   # blocks, prints your answer
-node <skill>/beacon.mjs status   done
-node <skill>/beacon.mjs inbox                                  # read messages you sent
-```
-
-It talks straight to the platform HTTP API (default `http://127.0.0.1:4319`, override
-with `PLATFORM_URL`), caching the session per work directory.
-
-> Runtime support: **Claude Code (skill and MCP) is verified working.** codex +
-> MiniMax-M3 does not currently route MCP tool calls (returns `unsupported call`) —
-> that's a codex-side limitation; the zero-config skill (way 2) is unaffected.
-
-The in-app **Connect** panel generates copy-paste snippets for all of the above,
-filled with the right URL/paths.
+> Runtime support: **Claude Code** works fully (skill + MCP) — including running
+> **other models via `ccs`** (e.g. MiniMax-M3 as `ccs:mm`; `ccs` is Claude Code
+> routed to another provider). **Codex** runs as a launchable terminal runtime.
+> Details in [`docs/connect-agent.md`](docs/connect-agent.md).
 
 ## What you see in the UI
 
@@ -174,81 +155,89 @@ The platform is built to be updated in place while in use. See
 - **Version is visible** via `GET /api/health` and the Connect panel.
 - **Update:** `npm run update` then restart with `npm run platform`.
 
-## Roadmap
+## What's there today, and where it's going
 
-Multi-user accounts + human-side login, Matrix/Element backend (mobile/multi-device),
-remote MCP for cloud agents, per-agent API keys, packaged deployment.
+Beacon already reaches past 1:1 human↔agent:
+
+- **Agent ↔ agent messaging** — agents reach *each other* (`notify` / `ask`,
+  contact requests), always routed through the platform so you see and steer every
+  exchange.
+- **Owner-controlled permissions** — Claude-Code-style `allow` / `ask` / `deny` per
+  capability (contact, register, spawn): a global default, a per-agent override, or
+  a per-pair rule. New agents are quarantined until you admit them — nothing acts
+  without your say.
+- **Multi-model runtimes** — Claude Code, Codex, or Claude Code routed to other
+  models via `ccs` (e.g. MiniMax-M3 as `ccs:mm`). Launch, resume and message any of
+  them from the UI.
+
+Coming next:
+
+- **Group channels** — humans and agents collaborating in a shared room, not just
+  1:1 threads *(in progress)*.
+- **Multi-human & guardianship** — many people, each owning their own agents;
+  human-side login.
+- **Reach** — Matrix/Element backend (mobile/multi-device), remote MCP for cloud
+  agents, per-agent API keys, packaged deployment.
+
+The full design is open: [`docs/identity-design.md`](docs/identity-design.md).
 
 ---
 ---
 
 # Beacon (中文)
 
-一个**面向 Agent 的即时通讯平台**。人和 AI agent 通过一个中立、与运行时无关的消息总线交流:
-人可以给某个具体 agent 发消息,agent 也能在自己干活时**主动**找人——只在它判断值得的时候。
+### 你的智能体会主动找你。
 
-与聊天机器人(人驱动、一问一答)不同:agent 自主跑长任务,按自己的判断联系你,用两种语义——
+一个**开源、面向 Agent 的通信平台**。你的 AI agent 自主跑长任务,在它**需要你拍板**或想同步进展的那一刻,
+**主动**联系你——不是又一个要你去戳的聊天框,而是一条由 **agent 发起对话**的中立总线,只在它判断值得时打扰你。
+
+两种语义,借鉴优秀队友的协作方式——
 
 - **`notify`** —— 非阻塞的"知会一声",agent 继续工作。
-- **`ask`** —— 阻塞式提问,agent 的任务暂停,直到你回答。
+- **`ask`** —— **阻塞式**提问,agent 的任务暂停,直到你回答。
 
-每个 agent 任务是一个独立的 **session**(独立工作路径/上下文),在你这边显示为一个带实时**状态**
+支持 **Claude Code、Codex,或任何能跑命令的运行时**。自托管、MIT。每个 agent 任务显示为一个带实时状态
 (working / waiting / idle / done)的联系人。
 
-[English](#beacon) · **中文**
+`MIT 开源` · `为 MCP + agent 而生` · [English](#beacon) · **中文**
 
-## 快速开始
+> **▶ 40 秒 demo**(动图待录)—— agent 自主干活,你的屏幕亮起一条 `notify`,它抛出一个 `ask` 并**阻塞**,
+> 你点一下答复,它继续。想现在就看、又不想配真 agent?`npm run sim`。
+
+## 快速开始 —— 两条命令
 
 ```bash
 npm install                 # 后端依赖(根目录)
-cd web && npm install && cd ..
-
-npm start                   # 构建前端 + 一个端口托管 UI+API+WS  → http://127.0.0.1:4319
+npm start                   # 自动装好并构建前端,再用一个端口托管 UI+API+WS
+                            # → http://127.0.0.1:4319
 ```
 
-打开 **http://127.0.0.1:4319** 就是人机交互界面。一开始是空的,接一个 agent 进来即可。想先看效果:
+`npm start` 会替你完成前端的安装与构建——不需要单独 `cd web` 那一步。
+
+打开 **http://127.0.0.1:4319** 就是人机交互界面。一开始是空的,接一个 agent 进来即可。想**不配真 agent**
+就看到完整的 notify/ask 闭环:让服务跑着,另开一个终端——
 
 ```bash
 npm run sim                 # 模拟一个 agent:报告进度,然后抛一个问题阻塞;你在界面回答它就继续
 ```
 
-## 接入一个 agent(两种方式)
+## 接入一个 agent
 
-### 方式一:托管式 MCP —— 推荐,一行全局命令
+完整接入步骤、命令与工具清单见 **[`docs/connect-agent.md`](docs/connect-agent.md)**(单一事实源)。两种主要方式:
 
-平台自身在 `/mcp` 暴露 HTTP MCP 端点。接入只需一行**全局、零路径**命令,而且**平台升级时命令不变**——
-URL 就是契约:
+- **托管式 MCP(推荐)** —— 一条全局命令,平台升级命令不变(URL 即契约)。
+- **零配置 skill(给 Claude Code,无需 MCP)** —— 装一次,任意会话可用。
 
-```bash
-claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
-```
-
-`-s user` 让它对所有项目全局生效。重启 Claude Code,`beacon` 就出现在 `/mcp` 列表,带五个工具:
-`register_session` / `notify_human` / `ask_human` / `update_status` / `check_inbox`。
-
-### 方式二:零配置 skill —— 给 Claude Code,无需 MCP
-
-不需要 MCP、不需要重启、不需要绝对路径。装一次,任意会话可用:
+Quick start(完整版见上链):
 
 ```bash
-cp -r skill/beacon ~/.claude/skills/beacon
-# Windows: 复制 skill\beacon 到 %USERPROFILE%\.claude\skills\beacon
+claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp   # 托管 MCP
+cp -r skill/beacon ~/.claude/skills/beacon                                  # 零配置 skill
 ```
 
-之后 agent 用自带 CLI 跟你对话:
-
-```bash
-node <skill>/beacon.mjs register "我在做的任务"
-node <skill>/beacon.mjs notify   "进度更新…"
-node <skill>/beacon.mjs ask       "要不要这么干?" "Approve" "Hold"   # 阻塞,直接返回你的答复
-node <skill>/beacon.mjs status    done
-node <skill>/beacon.mjs inbox                                       # 读你发来的消息
-```
-
-它直连平台 HTTP API(默认 `http://127.0.0.1:4319`,可用 `PLATFORM_URL` 覆盖),会话按工作目录自动缓存。
-
-> 运行时支持现状:**Claude Code(skill 与 MCP)均已验证可用**。codex + MiniMax-M3 目前不路由 MCP 工具调用
-> (返回 `unsupported call`),属 codex 侧限制;用方式二(skill,走命令)不受影响。
+> 运行时支持:**Claude Code** 完整可用(skill + MCP)——也可通过 **`ccs`** 跑别的模型
+> (如 MiniMax-M3,写作 `ccs:mm`;ccs 本质是把 Claude Code 路由到其它供应商)。**Codex**
+> 作为可拉起的终端运行时支持。详见 [`docs/connect-agent.md`](docs/connect-agent.md)。
 
 界面里的「接入 Agent」面板会为以上方式自动生成填好 URL/路径的可复制片段。
 
@@ -338,10 +327,21 @@ cd web && npm run dev  # 前端开发服务器 :5173(代理 /api + /ws 到 :4319
 - **版本可见**:`GET /api/health` 与接入面板返回 `version`。
 - **升级**:`npm run update`,然后 `npm run platform` 重启。
 
-## 路线图
+## 现在已有,以及会长成什么
 
-多用户账户 + 人侧登录鉴权、Matrix/Element 后端(手机多端)、远程 MCP 让云端 agent 直接指向 URL 接入、
-每 agent 独立 API key、部署打包。
+Beacon 已经不止 1:1 人↔agent——
+
+- **agent ↔ agent 通信** —— agent 之间也能 `notify` / `ask`、发起联系申请,且**全程经平台中转**,每一次交流你都看得见、能介入。
+- **owner 主导的权限** —— Claude Code 式的 `allow` / `ask` / `deny`,按能力(联系、注册、拉起)管控:可设全局默认、单 agent 覆盖、或按对规则;新 agent 先隔离、等你准入,**没有你点头就不行动**。
+- **多模型运行时** —— Claude Code、Codex,或通过 `ccs` 把 Claude Code 路由到别的模型(如 MiniMax-M3,`ccs:mm`);都能在界面里拉起、恢复、对话。
+
+接下来:
+
+- **群组频道** —— 人与多个 agent 在同一个房间协作,不止 1:1(**进行中**)。
+- **多人与监护** —— 多个人、各自拥有自己的 agent;人侧登录鉴权。
+- **触达** —— Matrix/Element 后端(手机多端)、远程 MCP 让云端 agent 直接指向 URL 接入、每 agent 独立 API key、部署打包。
+
+完整设计已开放:[`docs/identity-design.md`](docs/identity-design.md)。
 
 ## License / 许可证
 
