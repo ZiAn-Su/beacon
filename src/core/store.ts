@@ -19,6 +19,8 @@ import type {
   Grant,
   GrantEffect,
   ContactRequest,
+  Channel,
+  ChannelMessage,
 } from './types';
 import { SESSION_STATUSES } from './types';
 import { getSettings } from './settings';
@@ -119,6 +121,26 @@ CREATE TABLE IF NOT EXISTS spawn_requests (
   decidedAt INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_spawn_ask ON spawn_requests(askId);
+CREATE TABLE IF NOT EXISTS channels (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  createdAt INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS channel_participants (
+  channelId TEXT NOT NULL,
+  sessionId TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  PRIMARY KEY (channelId, sessionId)
+);
+CREATE INDEX IF NOT EXISTS idx_cp_session ON channel_participants(sessionId);
+CREATE TABLE IF NOT EXISTS channel_messages (
+  id TEXT PRIMARY KEY,
+  channelId TEXT NOT NULL,
+  fromSessionId TEXT,
+  text TEXT NOT NULL,
+  createdAt INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cm_channel ON channel_messages(channelId, createdAt);
 `);
 
 // Additive migrations: bring older databases (created before a column existed)
@@ -1429,4 +1451,168 @@ export function resolvePeerPermission(
 ): 'allow' | 'deny' | 'approval' {
   const effect = resolveCapability(fromId, 'contact_agent', toId);
   return effect === 'ask' ? 'approval' : effect;
+}
+
+// ---------- channels (group messaging) ----------
+// A channel fans a message out to all its participants. The human (owner) is
+// implicitly in every channel; agents are explicit participants. v1 is broadcast
+// chat: anyone in the channel posts, everyone sees. The human reads the channel
+// thread directly; agents pick messages up via check_inbox (channelInbox).
+const insertChannel = db.prepare(
+  `INSERT INTO channels (id, name, createdAt) VALUES (@id, @name, @createdAt)`,
+);
+const selectChannels = db.prepare(`SELECT * FROM channels ORDER BY createdAt ASC`);
+const selectChannel = db.prepare(`SELECT * FROM channels WHERE id = ?`);
+const updateChannelName = db.prepare(`UPDATE channels SET name = @name WHERE id = @id`);
+const deleteChannelRow = db.prepare(`DELETE FROM channels WHERE id = ?`);
+const insertParticipant = db.prepare(
+  `INSERT OR IGNORE INTO channel_participants (channelId, sessionId, createdAt)
+   VALUES (@channelId, @sessionId, @createdAt)`,
+);
+const deleteParticipant = db.prepare(
+  `DELETE FROM channel_participants WHERE channelId = ? AND sessionId = ?`,
+);
+const selectParticipants = db.prepare(
+  `SELECT sessionId FROM channel_participants WHERE channelId = ? ORDER BY createdAt ASC`,
+);
+const selectChannelsForSession = db.prepare(
+  `SELECT channelId FROM channel_participants WHERE sessionId = ?`,
+);
+const isParticipantStmt = db.prepare(
+  `SELECT 1 FROM channel_participants WHERE channelId = ? AND sessionId = ? LIMIT 1`,
+);
+const deleteParticipantsForChannel = db.prepare(
+  `DELETE FROM channel_participants WHERE channelId = ?`,
+);
+const deleteParticipantsForSession = db.prepare(
+  `DELETE FROM channel_participants WHERE sessionId = ?`,
+);
+const insertChannelMessage = db.prepare(
+  `INSERT INTO channel_messages (id, channelId, fromSessionId, text, createdAt)
+   VALUES (@id, @channelId, @fromSessionId, @text, @createdAt)`,
+);
+const selectChannelMessages = db.prepare(
+  `SELECT * FROM channel_messages WHERE channelId = ? ORDER BY createdAt ASC`,
+);
+const deleteChannelMessages = db.prepare(
+  `DELETE FROM channel_messages WHERE channelId = ?`,
+);
+
+export function createChannel(name: string): Channel {
+  const c: Channel = { id: randomUUID(), name: name.trim() || 'channel', createdAt: now() };
+  insertChannel.run(c);
+  bus.emit('channel', c);
+  return c;
+}
+
+export function listChannels(): Channel[] {
+  return selectChannels.all() as Channel[];
+}
+
+export function getChannel(id: string): Channel | undefined {
+  return selectChannel.get(id) as Channel | undefined;
+}
+
+export function renameChannel(id: string, name: string): Channel | undefined {
+  const c = getChannel(id);
+  if (!c) return undefined;
+  updateChannelName.run({ id, name: name.trim() || c.name });
+  const updated = getChannel(id)!;
+  bus.emit('channel', updated);
+  return updated;
+}
+
+export function deleteChannel(id: string): boolean {
+  const c = getChannel(id);
+  if (!c) return false;
+  const tx = db.transaction(() => {
+    deleteChannelMessages.run(id);
+    deleteParticipantsForChannel.run(id);
+    deleteChannelRow.run(id);
+  });
+  tx();
+  bus.emit('channelRemoved', id);
+  return true;
+}
+
+/** Add an agent (session) to a channel. Idempotent. */
+export function addParticipant(channelId: string, sessionId: string): Channel | undefined {
+  const c = getChannel(channelId);
+  if (!c || !getSession(sessionId)) return undefined;
+  insertParticipant.run({ channelId, sessionId, createdAt: now() });
+  bus.emit('channel', c);
+  return c;
+}
+
+export function removeParticipant(channelId: string, sessionId: string): Channel | undefined {
+  const c = getChannel(channelId);
+  if (!c) return undefined;
+  deleteParticipant.run(channelId, sessionId);
+  bus.emit('channel', c);
+  return c;
+}
+
+/** The agent session ids in a channel (the human/owner is implicit, not listed). */
+export function listParticipants(channelId: string): string[] {
+  return (selectParticipants.all(channelId) as { sessionId: string }[]).map((r) => r.sessionId);
+}
+
+export function isParticipant(channelId: string, sessionId: string): boolean {
+  return !!isParticipantStmt.get(channelId, sessionId);
+}
+
+/** Channels an agent belongs to. */
+export function channelsForSession(sessionId: string): Channel[] {
+  const ids = (selectChannelsForSession.all(sessionId) as { channelId: string }[]).map(
+    (r) => r.channelId,
+  );
+  return ids.map((id) => getChannel(id)).filter((c): c is Channel => !!c);
+}
+
+/**
+ * Post a message to a channel. `fromSessionId` is the posting agent, or null for
+ * the human (owner). Fans out via the bus; agents read it through channelInbox.
+ */
+export function postChannelMessage(
+  channelId: string,
+  fromSessionId: string | null,
+  text: string,
+): ChannelMessage {
+  if (!getChannel(channelId)) throw new Error('channel not found');
+  const m: ChannelMessage = {
+    id: randomUUID(),
+    channelId,
+    fromSessionId: fromSessionId ?? null,
+    text,
+    createdAt: now(),
+  };
+  insertChannelMessage.run(m);
+  if (fromSessionId) touchSeen(fromSessionId);
+  bus.emit('channelMessage', m);
+  return m;
+}
+
+export function channelMessages(channelId: string): ChannelMessage[] {
+  return selectChannelMessages.all(channelId) as ChannelMessage[];
+}
+
+/**
+ * Channel messages an agent should receive: those in its channels, created after
+ * `after`, excluding its own posts. Used by the agent-facing check_inbox so a
+ * polling agent picks up group traffic alongside 1:1 chat.
+ */
+export function channelInbox(
+  sessionId: string,
+  after: number,
+): { channelId: string; channelName: string; fromSessionId: string | null; text: string; createdAt: number }[] {
+  const channels = channelsForSession(sessionId);
+  const out: { channelId: string; channelName: string; fromSessionId: string | null; text: string; createdAt: number }[] = [];
+  for (const c of channels) {
+    for (const m of channelMessages(c.id)) {
+      if (m.createdAt > after && m.fromSessionId !== sessionId) {
+        out.push({ channelId: c.id, channelName: c.name, fromSessionId: m.fromSessionId, text: m.text, createdAt: m.createdAt });
+      }
+    }
+  }
+  return out.sort((a, b) => a.createdAt - b.createdAt);
 }

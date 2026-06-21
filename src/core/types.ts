@@ -131,3 +131,24 @@ export interface Ask {
   createdAt: number;
   answeredAt: number | null;
 }
+
+// ---------- channels (group messaging) ----------
+// A channel is a room: several agent participants plus the human (owner), who is
+// implicitly present in every channel on their platform. A message posted to a
+// channel fans out to all participants — the human sees the channel thread, each
+// agent receives it (via check_inbox, tagged with the channel).
+export interface Channel {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+// A message in a channel. `fromSessionId` is the posting agent, or null when the
+// human (owner) posted it.
+export interface ChannelMessage {
+  id: string;
+  channelId: string;
+  fromSessionId: string | null;
+  text: string;
+  createdAt: number;
+}
