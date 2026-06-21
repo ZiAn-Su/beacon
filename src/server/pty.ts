@@ -51,12 +51,30 @@ interface LivePty {
   pending: string[]; // messages queued while the TUI is still booting
   idleTimer: NodeJS.Timeout | null;
   heartbeat: NodeJS.Timeout | null;
+  lastDataAt: number; // last time the PTY produced output (activity signal)
+  gateAt: number; // last time we auto-dismissed a boot gate (debounce)
 }
 
 // How long after spawn we treat the TUI as "still booting" — messages sent in
 // this window are queued and flushed once it's ready, so they don't get dropped
 // before the input box exists.
 const BOOT_MS = 3500;
+
+// Strip ANSI escapes so we can pattern-match the visible terminal text.
+function ansiStrip(s: string): string {
+  return s
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+}
+// Benign one-time boot gates that just want an Enter to move on (Claude Code's
+// "Welcome to Claude Code for VS Code … Press Enter to continue", etc.). A
+// launched agent would otherwise sit here forever, invisibly to the human.
+const ENTER_GATE = /press enter to continue/i;
+// Only auto-press Enter during the boot window, so we never interfere with the
+// agent's real work later.
+const GATE_WINDOW_MS = 30_000;
+// Flip a working agent to 'idle' after this long with no terminal output.
+const QUIET_IDLE_MS = 60_000;
 
 const live = new Map<string, LivePty>();
 
@@ -227,6 +245,8 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     pending: [],
     idleTimer: null,
     heartbeat: null,
+    lastDataAt: Date.now(),
+    gateAt: 0,
   };
   live.set(sessionId, entry);
 
@@ -245,6 +265,13 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
   store.touchSeen(sessionId);
   entry.heartbeat = setInterval(() => {
     if (entry.clients.size > 0) store.touchSeen(sessionId);
+    // Activity -> idle: a working terminal agent that's produced no output for a
+    // while is no longer actively doing anything. Surfaces on Beacon (the roster
+    // status) so the human can tell it's quiet without opening the terminal.
+    const s = store.getSession(sessionId);
+    if (s && s.status === 'working' && Date.now() - entry.lastDataAt > QUIET_IDLE_MS) {
+      store.setStatus(sessionId, 'idle');
+    }
   }, 30_000);
 
   proc.onData((data: string) => {
@@ -254,6 +281,23 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     }
     for (const ws of entry.clients) {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
+    }
+    entry.lastDataAt = Date.now();
+    // Activity -> working: producing output means it's doing something. Only flip
+    // from a resting state so we don't thrash the status on every chunk.
+    const s = store.getSession(sessionId);
+    if (s && (s.status === 'idle' || s.status === 'registered')) {
+      store.setStatus(sessionId, 'working');
+    }
+    // Auto-dismiss benign boot gates (welcome screens) during the boot window so
+    // a launched agent doesn't sit stuck on "Press Enter to continue".
+    if (
+      Date.now() - entry.spawnedAt < GATE_WINDOW_MS &&
+      Date.now() - entry.gateAt > 3000 &&
+      ENTER_GATE.test(ansiStrip(entry.buffer).slice(-1500))
+    ) {
+      entry.gateAt = Date.now();
+      try { entry.proc.write('\r'); } catch { /* exited */ }
     }
   });
 

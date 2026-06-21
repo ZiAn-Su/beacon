@@ -3,6 +3,21 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.7.6] - 2026-06-21
+
+### 新增 —— 终端 agent 实时状态上报 Beacon(v1)+ 自动越过开机门
+
+承接实战痛点:拉起的终端 agent 卡在 Claude Code 的开机欢迎页(「Press Enter to continue」),
+人在 Beacon 上看不到。`pty.ts` 现在监看 PTY 输出:
+
+- **自动越过良性开机门**:启动 30 秒窗口内,检测到「Press Enter to continue」这类欢迎/确认页就
+  自动回车跳过,launched agent 不再卡在开机页。
+- **活动→状态**:有输出即置 `working`;静默超过 60 秒则置 `idle`。状态实时推到 Beacon(WS),
+  人不开终端也能看出它在跑 / 安静了 / 卡住了(停在某处不动 = 很快变 idle)。
+- 配合 v0.7.5「消息送达即 working」,形成最小可用的"在 Beacon 上看得见终端 agent 在干嘛"。
+
+仍待做:区分「安静=完成」与「安静=卡在某个非欢迎类提示」的更精细识别。
+
 ## [0.7.5] - 2026-06-21
 
 ### 修复 —— 拉起的终端 agent 不再卡在权限弹窗;消息送达后状态可见
