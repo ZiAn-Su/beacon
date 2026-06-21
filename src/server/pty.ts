@@ -53,6 +53,9 @@ interface LivePty {
   heartbeat: NodeJS.Timeout | null;
   lastDataAt: number; // last time the PTY produced output (activity signal)
   gateAt: number; // last time we auto-dismissed a boot gate (debounce)
+  promptNotedAt: number; // last time we surfaced a stuck-on-prompt notify
+  limitNotedAt: number; // last time we surfaced a usage/rate-limit notify
+  promptWaiting: boolean; // we set 'waiting' from a terminal prompt (recover it)
 }
 
 // How long after spawn we treat the TUI as "still booting" — messages sent in
@@ -75,6 +78,32 @@ const ENTER_GATE = /press enter to continue/i;
 const GATE_WINDOW_MS = 30_000;
 // Flip a working agent to 'idle' after this long with no terminal output.
 const QUIET_IDLE_MS = 60_000;
+
+// The agent is stuck on an interactive prompt the human must resolve IN the
+// terminal — a trust-folder gate, a permission choice, a yes/no, a first-run
+// picker. Under bypassPermissions most are gone, but a few (folder trust, theme
+// on first run) still block. We do NOT auto-answer these (they are real
+// decisions); we surface them so the human isn't left wondering why no reply came.
+const PROMPT_GATE =
+  /(do you want to proceed|do you trust the files|press \d+ to|❯\s*\d+\.|\b1\.\s+yes\b|\(y\/n\)|\[y\/n\])/i;
+// The model/provider refused or throttled: usage cap, rate limit, quota. Same
+// silent-stall problem from the human's side — surface it instead of hanging.
+const LIMIT_GATE =
+  /(usage limit reached|reached your usage limit|approaching your .{0,24}limit|rate limit|429 too many|quota exceeded|insufficient .{0,14}(quota|credit|balance)|overloaded_error)/i;
+// A persistent prompt produces output once; debounce so we notify once, not on
+// every chunk, and re-notify only if it recurs after this window.
+const DETECT_DEBOUNCE_MS = 45_000;
+
+// Pull the last line matching `re` from stripped terminal text, trimmed, so the
+// surfaced notify carries the actual prompt/limit text the human needs to see.
+function matchedLine(text: string, re: RegExp): string {
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const ln = lines[i]!.trim();
+    if (ln && re.test(ln)) return ln.slice(0, 160);
+  }
+  return '';
+}
 
 const live = new Map<string, LivePty>();
 
@@ -247,6 +276,9 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     heartbeat: null,
     lastDataAt: Date.now(),
     gateAt: 0,
+    promptNotedAt: 0,
+    limitNotedAt: 0,
+    promptWaiting: false,
   };
   live.set(sessionId, entry);
 
@@ -283,10 +315,22 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
       if (ws.readyState === WebSocket.OPEN) ws.send(data);
     }
     entry.lastDataAt = Date.now();
+    const recent = ansiStrip(entry.buffer).slice(-1800);
     // Activity -> working: producing output means it's doing something. Only flip
     // from a resting state so we don't thrash the status on every chunk.
     const s = store.getSession(sessionId);
     if (s && (s.status === 'idle' || s.status === 'registered')) {
+      store.setStatus(sessionId, 'working');
+    } else if (
+      s &&
+      s.status === 'waiting' &&
+      entry.promptWaiting &&
+      !PROMPT_GATE.test(recent)
+    ) {
+      // A terminal prompt we surfaced has been answered (output moved past it) —
+      // flip back to working. Scoped to prompt-driven waits so we never override
+      // a genuine ask_human block.
+      entry.promptWaiting = false;
       store.setStatus(sessionId, 'working');
     }
     // Auto-dismiss benign boot gates (welcome screens) during the boot window so
@@ -294,10 +338,43 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     if (
       Date.now() - entry.spawnedAt < GATE_WINDOW_MS &&
       Date.now() - entry.gateAt > 3000 &&
-      ENTER_GATE.test(ansiStrip(entry.buffer).slice(-1500))
+      ENTER_GATE.test(recent)
     ) {
       entry.gateAt = Date.now();
       try { entry.proc.write('\r'); } catch { /* exited */ }
+    }
+    // Silent-stall surfacing: the launched agent doesn't call Beacon's south API,
+    // so when it gets stuck on a terminal prompt or hits a model usage/rate limit,
+    // the human would otherwise see nothing — message sent, no reply, no clue.
+    // Surface both as an agent notify (-> roster status + desktop notification),
+    // debounced so a persistent prompt pings once. A real choice is never
+    // auto-answered; we just tell the human to open the terminal and decide.
+    const nowMs = Date.now();
+    if (LIMIT_GATE.test(recent) && nowMs - entry.limitNotedAt > DETECT_DEBOUNCE_MS) {
+      entry.limitNotedAt = nowMs;
+      const line = matchedLine(recent, LIMIT_GATE);
+      store.addMessage({
+        sessionId,
+        direction: 'agent',
+        kind: 'notify',
+        text: `Paused — hit a model usage/rate limit.${line ? ` ${line}` : ''}`,
+      });
+      store.setStatus(sessionId, 'idle');
+    } else if (
+      nowMs - entry.spawnedAt > 1500 &&
+      PROMPT_GATE.test(recent) &&
+      nowMs - entry.promptNotedAt > DETECT_DEBOUNCE_MS
+    ) {
+      entry.promptNotedAt = nowMs;
+      entry.promptWaiting = true;
+      const line = matchedLine(recent, PROMPT_GATE);
+      store.addMessage({
+        sessionId,
+        direction: 'agent',
+        kind: 'notify',
+        text: `Waiting on a choice in the terminal — open it to decide.${line ? ` ${line}` : ''}`,
+      });
+      store.setStatus(sessionId, 'waiting');
     }
   });
 
