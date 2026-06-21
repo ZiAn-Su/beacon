@@ -15,6 +15,7 @@ import type { IncomingMessage } from 'node:http';
 import * as pty from 'node-pty';
 import { URL } from 'node:url';
 import * as store from '../core/store';
+import { ccsProfile } from './runtimes';
 
 const isWin = process.platform === 'win32';
 
@@ -49,7 +50,12 @@ const live = new Map<string, LivePty>();
 
 /** Runtimes Beacon knows how to drive as an agent (vs. a bare shell). */
 function isAgentRuntime(runtime: string): boolean {
-  return runtime === 'claude-code' || runtime === 'claude' || runtime === 'codex';
+  return (
+    runtime === 'claude-code' ||
+    runtime === 'claude' ||
+    runtime === 'codex' ||
+    ccsProfile(runtime) !== null // ccs:<profile>, e.g. ccs:mm, ccs:ark
+  );
 }
 
 /** Is there a live interactive terminal (PTY) for this session right now? */
@@ -150,6 +156,14 @@ function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boo
     // when the platform knows its native id; else the most recent in the work dir.
     if (fresh) return wrap('claude');
     return wrap(nativeSessionId ? `claude --resume ${nativeSessionId}` : 'claude --continue');
+  }
+  // ccs:<profile> -> Claude Code routed to another model (minimax m3, ark, …).
+  // ccs forwards claude args, so resume/continue work identically.
+  const profile = ccsProfile(runtime);
+  if (profile) {
+    const base = `ccs ${profile}`;
+    if (fresh) return wrap(base);
+    return wrap(nativeSessionId ? `${base} --resume ${nativeSessionId}` : `${base} --continue`);
   }
   if (runtime === 'codex') return wrap('codex');
 

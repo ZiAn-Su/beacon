@@ -6,6 +6,7 @@
 // on a shell command line. `claude -p` reads its prompt from stdin.
 import { spawn } from 'node:child_process';
 import type { Session } from '../core/types';
+import { ccsProfile } from './runtimes';
 
 // A session is "online" if its agent talked to Beacon within this window.
 export const ONLINE_TTL_MS = 60_000;
@@ -28,17 +29,20 @@ function startArgv(
 ): string[] | null {
   const override = process.env.BEACON_WAKE_CMD;
   if (override && override.trim()) return override.trim().split(/\s+/);
-  switch (runtime) {
-    case 'claude-code':
-      // Prefer resuming the EXACT conversation (platform-resolved native id);
-      // fall back to the most recent one in the work dir. One print turn, under
-      // the chosen permission mode.
-      return nativeSessionId
-        ? ['claude', '--resume', nativeSessionId, '--print', '--permission-mode', permissionMode]
-        : ['claude', '--continue', '--print', '--permission-mode', permissionMode];
-    default:
-      return null;
+  // Tail flags are identical across Claude Code and ccs (ccs forwards them).
+  const tail = nativeSessionId
+    ? ['--resume', nativeSessionId, '--print', '--permission-mode', permissionMode]
+    : ['--continue', '--print', '--permission-mode', permissionMode];
+  if (runtime === 'claude-code' || runtime === 'claude') {
+    // Prefer resuming the EXACT conversation (platform-resolved native id);
+    // fall back to the most recent one in the work dir. One print turn, under
+    // the chosen permission mode.
+    return ['claude', ...tail];
   }
+  // ccs:<profile> -> Claude Code on another model (minimax m3, ark, …).
+  const profile = ccsProfile(runtime);
+  if (profile) return ['ccs', profile, ...tail];
+  return null;
 }
 
 function startPrompt(humanText: string): string {

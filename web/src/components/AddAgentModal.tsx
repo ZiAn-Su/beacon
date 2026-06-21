@@ -18,7 +18,10 @@ interface Props {
   defaultPath?: string;
 }
 
-const RUNTIMES = ["claude-code", "codex"] as const;
+// Suggestions for the runtime combobox. Free text is allowed (e.g. any ccs
+// profile like `ccs:ark`), so this is a datalist, not a closed dropdown. `ccs:*`
+// runs Claude Code routed to another model (mm = minimax m3, ark = …).
+const RUNTIMES = ["claude-code", "codex", "ccs:mm", "ccs:ark"] as const;
 const POLL_MS = 4000;
 
 export function AddAgentModal({ open, onClose, onAdded, defaultPath }: Props) {
@@ -181,16 +184,19 @@ export function AddAgentModal({ open, onClose, onAdded, defaultPath }: Props) {
                   style={{ color: "var(--text)" }}
                 />
               </div>
-              <select
+              <input
+                list="beacon-runtimes"
                 value={runtime}
                 onChange={(e) => setRuntime(e.target.value)}
-                className="rounded-lg px-2 py-1.5 text-[12.5px] outline-none"
+                spellCheck={false}
+                className="w-32 rounded-lg px-2 py-1.5 font-mono text-[12.5px] outline-none"
                 style={{ background: "var(--bg-sidebar)", color: "var(--text)", border: "1px solid var(--border)" }}
-              >
+              />
+              <datalist id="beacon-runtimes">
                 {RUNTIMES.map((r) => (
-                  <option key={r} value={r}>{r}</option>
+                  <option key={r} value={r} />
                 ))}
-              </select>
+              </datalist>
             </div>
           </div>
 

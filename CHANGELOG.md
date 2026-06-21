@@ -3,6 +3,21 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.7.3] - 2026-06-21
+
+### 新增 —— 多模型运行时:ccs(Claude Code + 供应商路由),支持 minimax m3 等
+
+Beacon 现在能把 **`ccs:<档位>`** 当一等 agent 运行时拉起 / spawn / 唤醒。`ccs` 是 Claude Code 的
+供应商路由 CLI(`ccs <档位> [claude 参数]`),底层仍是 Claude Code,所以 `--resume/--continue`、
+会话记录、`BEACON_SESSION_ID` 注入全部照常工作。
+
+- **运行时**:`ccs:mm`(minimax m3)、`ccs:ark`、任意 `ccs:<档位>` 通配,零 per-档位 代码
+  (`src/server/runtimes.ts` + `pty.ts`/`wake.ts` 适配)。档位字符集受限,命令拼接防注入。
+- **UI**:接入面板的运行时从固定下拉改成**可输入的组合框**(datalist 建议 + 自由输入),
+  可直接填 `ccs:ark` 等自定义档位。
+- 纯通信(注册/notify/ask/peer)本就与运行时无关,任何能跑命令或讲 MCP 的 agent 都能接入;
+  本次补的是**平台主动拉起**非 Anthropic 模型的那条线。
+
 ## [0.7.2] - 2026-06-21
 
 ### 新增 —— 通讯录「待准入」分组 + 角标
