@@ -11,6 +11,7 @@ import {
 import type { Channel, ChannelMessage, Message, Session, WsEvent } from "../types";
 import {
   addChannelParticipant,
+  answerChannelAsk as answerChannelAskApi,
   batchSessions as batchSessionsApi,
   cancelAsk,
   createChannel as createChannelApi,
@@ -80,6 +81,7 @@ interface StoreState {
   addChannelMember: (channelId: string, sessionId: string) => Promise<void>;
   removeChannelMember: (channelId: string, sessionId: string) => Promise<void>;
   postToChannel: (channelId: string, text: string) => Promise<void>;
+  answerChannelAsk: (channelId: string, askId: string, text: string) => Promise<void>;
 }
 
 const StoreContext = createContext<StoreState | null>(null);
@@ -457,16 +459,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const postToChannel = useCallback(async (channelId: string, text: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const m = await postChannelMessageApi(channelId, trimmed);
+  const appendChannelMessage = useCallback((channelId: string, m: ChannelMessage) => {
     setChannelMessages((prev) => {
       const list = prev[channelId] ?? [];
       if (list.some((x) => x.id === m.id)) return prev;
       return { ...prev, [channelId]: [...list, m] };
     });
   }, []);
+
+  const postToChannel = useCallback(
+    async (channelId: string, text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      appendChannelMessage(channelId, await postChannelMessageApi(channelId, trimmed));
+    },
+    [appendChannelMessage],
+  );
+
+  const answerChannelAsk = useCallback(
+    async (channelId: string, askId: string, text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      appendChannelMessage(channelId, await answerChannelAskApi(channelId, askId, trimmed));
+    },
+    [appendChannelMessage],
+  );
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   useEffect(() => {
@@ -571,6 +588,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addChannelMember,
       removeChannelMember,
       postToChannel,
+      answerChannelAsk,
     }),
     [
       sessions,
@@ -605,6 +623,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       addChannelMember,
       removeChannelMember,
       postToChannel,
+      answerChannelAsk,
     ],
   );
 

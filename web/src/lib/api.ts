@@ -442,3 +442,17 @@ export async function postChannelMessage(
   });
   return (await json<{ message: ChannelMessage }>(r)).message;
 }
+
+/** Owner answers a pending channel ask (first answer wins, unblocks the asker). */
+export async function answerChannelAsk(
+  channelId: string,
+  askId: string,
+  text: string,
+): Promise<ChannelMessage> {
+  const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/answer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ askId, text }),
+  });
+  return (await json<{ message: ChannelMessage }>(r)).message;
+}

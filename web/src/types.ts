@@ -71,12 +71,18 @@ export interface Channel {
   createdAt: number;
 }
 
+export type ChannelMsgKind = "chat" | "ask" | "answer";
+
 export interface ChannelMessage {
   id: string;
   channelId: string;
   // The posting agent's session id, or null for the human (owner).
   fromSessionId: string | null;
   text: string;
+  // 'ask' = a blocking question to the group; 'answer' resolved one. Optional
+  // for forward-compat (older payloads default to 'chat').
+  kind?: ChannelMsgKind;
+  askId?: string | null;
   createdAt: number;
 }
 

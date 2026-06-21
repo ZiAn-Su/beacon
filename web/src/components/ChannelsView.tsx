@@ -10,12 +10,13 @@ import {
 import {
   ArrowUp,
   Hash,
+  HelpCircle,
   Plus,
   Trash2,
   UserPlus,
   X,
 } from "lucide-react";
-import type { Session } from "../types";
+import type { ChannelMsgKind, Session } from "../types";
 import { useStore } from "../lib/store";
 import { useI18n } from "../lib/i18n";
 import { Avatar } from "./Avatar";
@@ -42,6 +43,7 @@ export function ChannelsView({ sessions, now }: Props) {
     addChannelMember,
     removeChannelMember,
     postToChannel,
+    answerChannelAsk,
   } = useStore();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -206,6 +208,7 @@ export function ChannelsView({ sessions, now }: Props) {
             messages={channelMessages[selected.id] ?? []}
             onBack={() => setMobileThread(false)}
             onPost={postToChannel}
+            onAnswer={answerChannelAsk}
             onAddMember={addChannelMember}
             onRemoveMember={removeChannelMember}
             onDelete={async () => {
@@ -246,6 +249,7 @@ function ChannelThread({
   messages,
   onBack,
   onPost,
+  onAnswer,
   onAddMember,
   onRemoveMember,
   onDelete,
@@ -256,9 +260,17 @@ function ChannelThread({
   sessions: Session[];
   sessionById: Map<string, Session>;
   participants: string[];
-  messages: { id: string; fromSessionId: string | null; text: string; createdAt: number }[];
+  messages: {
+    id: string;
+    fromSessionId: string | null;
+    text: string;
+    kind?: ChannelMsgKind;
+    askId?: string | null;
+    createdAt: number;
+  }[];
   onBack: () => void;
   onPost: (channelId: string, text: string) => Promise<void>;
+  onAnswer: (channelId: string, askId: string, text: string) => Promise<void>;
   onAddMember: (channelId: string, sessionId: string) => Promise<void>;
   onRemoveMember: (channelId: string, sessionId: string) => Promise<void>;
   onDelete: () => Promise<void>;
@@ -268,8 +280,17 @@ function ChannelThread({
   const [sending, setSending] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // When set, the composer answers this pending channel ask instead of chatting.
+  const [answering, setAnswering] = useState<{ askId: string; question: string } | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // Ask is resolved once a later 'answer' message carries the same askId.
+  const answeredAskIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const m of messages) if (m.kind === "answer" && m.askId) s.add(m.askId);
+    return s;
+  }, [messages]);
 
   const nameFor = useCallback(
     (id: string) => {
@@ -300,12 +321,17 @@ function ChannelThread({
     if (!text || sending) return;
     setSending(true);
     try {
-      await onPost(channelId, text);
+      if (answering) {
+        await onAnswer(channelId, answering.askId, text);
+        setAnswering(null);
+      } else {
+        await onPost(channelId, text);
+      }
       setValue("");
     } finally {
       setSending(false);
     }
-  }, [value, sending, onPost, channelId]);
+  }, [value, sending, onPost, onAnswer, answering, channelId]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -436,6 +462,9 @@ function ChannelThread({
             messages.map((m) => {
               const mine = m.fromSessionId == null;
               const who = mine ? t("channels.fromYou") : nameFor(m.fromSessionId!);
+              const isAsk = m.kind === "ask" && !!m.askId;
+              const isAnswer = m.kind === "answer";
+              const answered = isAsk && answeredAskIds.has(m.askId!);
               return (
                 <div
                   key={m.id}
@@ -454,6 +483,20 @@ function ChannelThread({
                       }
                       style={{ color: "var(--text-muted)" }}
                     >
+                      {isAsk && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide"
+                          style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                        >
+                          <HelpCircle size={10} />
+                          {t("channels.askBadge")}
+                        </span>
+                      )}
+                      {isAnswer && (
+                        <span className="font-semibold" style={{ color: "var(--color-working)" }}>
+                          {t("channels.answerBadge")}
+                        </span>
+                      )}
                       <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
                         {who}
                       </span>
@@ -464,15 +507,45 @@ function ChannelThread({
                       style={
                         mine
                           ? { background: "var(--accent)", color: "#fff" }
-                          : {
-                              background: "var(--surface-card)",
-                              color: "var(--text)",
-                              border: "1px solid var(--border)",
-                            }
+                          : isAsk
+                            ? {
+                                background: "var(--accent-soft)",
+                                color: "var(--text)",
+                                border: "1px solid var(--accent)",
+                              }
+                            : {
+                                background: "var(--surface-card)",
+                                color: "var(--text)",
+                                border: "1px solid var(--border)",
+                              }
                       }
                     >
                       {m.text}
                     </div>
+                    {isAsk && !mine && (
+                      <div className={"mt-1 flex " + (mine ? "justify-end" : "justify-start")}>
+                        {answered ? (
+                          <span className="text-[11px]" style={{ color: "var(--text-muted)" }}>
+                            {t("channels.askAnswered")}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              setAnswering({ askId: m.askId!, question: m.text });
+                              taRef.current?.focus();
+                            }}
+                            className="rounded-md px-2 py-0.5 text-[11.5px] font-semibold transition-colors"
+                            style={{
+                              color: "#fff",
+                              background: "var(--accent)",
+                              border: "1px solid var(--accent)",
+                            }}
+                          >
+                            {t("channels.answer")}
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -487,6 +560,33 @@ function ChannelThread({
         style={{ borderColor: "var(--border)", background: "var(--bg)" }}
       >
         <div className="mx-auto w-full max-w-[860px]">
+          {answering && (
+            <div
+              className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2"
+              style={{ background: "var(--accent-soft)", border: "1px solid var(--accent-soft)" }}
+            >
+              <HelpCircle size={13} style={{ color: "var(--accent)" }} />
+              <div className="min-w-0 flex-1">
+                <div
+                  className="text-[10.5px] font-semibold uppercase tracking-wider"
+                  style={{ color: "var(--accent)" }}
+                >
+                  {t("channels.answeringAsk")}
+                </div>
+                <div className="truncate text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                  {answering.question}
+                </div>
+              </div>
+              <button
+                onClick={() => setAnswering(null)}
+                aria-label={t("channels.create.cancel")}
+                className="flex h-6 w-6 items-center justify-center rounded-md"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
           <div
             className="relative flex items-end gap-2 rounded-2xl px-3 py-2"
             style={{
@@ -500,7 +600,11 @@ function ChannelThread({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder={t("channels.composer.placeholder", { name })}
+              placeholder={
+                answering
+                  ? t("channels.composer.answerPlaceholder")
+                  : t("channels.composer.placeholder", { name })
+              }
               rows={1}
               spellCheck
               className="scroll-area max-h-[160px] min-h-[36px] flex-1 resize-none bg-transparent px-1 py-1.5 text-sm leading-relaxed outline-none placeholder:text-[var(--text-muted)]"
