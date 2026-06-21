@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Archive, BookUser, Bot, ChevronDown, ChevronRight, PanelLeftClose, Plus, Sparkles } from "lucide-react";
+import { Archive, BookUser, Bot, ChevronDown, ChevronRight, Plus, Sparkles } from "lucide-react";
 import type { Message, Session } from "../types";
 import { ContactCard } from "./ContactCard";
 import { EmptyState } from "./EmptyState";
@@ -14,8 +14,6 @@ interface Props {
   onSelect: (id: string) => void;
   onConnectAgent?: () => void;
   onOpenDirectory?: () => void;
-  /** Collapse the contact-list column (desktop). */
-  onCollapse?: () => void;
 }
 
 type GroupKey = "waiting" | "active" | "done";
@@ -35,7 +33,6 @@ export function ContactList({
   onSelect,
   onConnectAgent,
   onOpenDirectory,
-  onCollapse,
 }: Props) {
   const { t } = useI18n();
   // Re-render the relative timestamps periodically.
@@ -216,19 +213,6 @@ export function ContactList({
             >
               <Plus size={12} strokeWidth={2.5} />
               {t("contacts.connect")}
-            </button>
-          )}
-          {onCollapse && (
-            <button
-              onClick={onCollapse}
-              aria-label={t("contacts.collapse")}
-              title={t("contacts.collapse")}
-              className="hidden md:flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-150"
-              style={{ color: "var(--text-secondary)" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
-            >
-              <PanelLeftClose size={15} />
             </button>
           )}
         </div>

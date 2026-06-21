@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, BookUser, Check, CheckSquare, Copy, MessageSquare, Pencil, Plus, Search, Square, Trash2, User, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookUser, Check, CheckSquare, Copy, History, MessageSquare, Pencil, Play, Plus, Search, Square, Terminal, Trash2, User, X } from "lucide-react";
 import type { Session, TrustTier } from "../types";
 import {
   createGrant,
@@ -10,7 +10,7 @@ import {
   type Grant,
 } from "../lib/api";
 import { Avatar } from "./Avatar";
-import { isOnline, isVisibleScope, pathBase, sessionName } from "../lib/format";
+import { absoluteTime, isOnline, isVisibleScope, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useStore } from "../lib/store";
 
@@ -365,21 +365,25 @@ function RosterSection({
   );
 }
 
-function ContactProfile({
+export function ContactProfile({
   session,
   onMessage,
   sessions,
+  now,
 }: {
   session: Session;
-  onMessage: (id: string) => void;
+  /** When provided, shows a "Message" action (Contacts page); omit in the chat panel. */
+  onMessage?: (id: string) => void;
   sessions: Session[];
+  now?: number;
 }) {
-  const { t } = useI18n();
+  const { t, rel } = useI18n();
   const { setSessionTrustTier, renameSession, setSessionDescription, setArchived, deleteSession } = useStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const nowMs = now ?? Date.now();
   const label = pathBase(session.workPath) || session.runtime;
   const title = sessionName(session, label);
-  const online = isOnline(session, Date.now());
+  const online = isOnline(session, nowMs);
   const tier = session.trustTier ?? "standard";
   // Show the current task as a subtitle only when a distinct display name exists
   // (otherwise the name already *is* the task and we'd print it twice).
@@ -591,6 +595,42 @@ function ContactProfile({
             </p>
           </Section>
 
+          {/* Timeline */}
+          <Section title={t("info.timeline")}>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between gap-3 text-[12.5px]">
+                <span className="inline-flex items-center gap-1.5" style={{ color: "var(--text-secondary)" }}>
+                  <Play size={12} style={{ color: "var(--text-muted)" }} /> {t("info.started")}
+                </span>
+                <span className="tabular-nums" style={{ color: "var(--text)" }} title={absoluteTime(session.createdAt)}>
+                  {rel(session.createdAt, nowMs)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 text-[12.5px]">
+                <span className="inline-flex items-center gap-1.5" style={{ color: "var(--text-secondary)" }}>
+                  <History size={12} style={{ color: "var(--text-muted)" }} /> {t("info.updated")}
+                </span>
+                <span className="tabular-nums" style={{ color: "var(--text)" }} title={absoluteTime(session.updatedAt)}>
+                  {rel(session.updatedAt, nowMs)}
+                </span>
+              </div>
+            </div>
+          </Section>
+
+          {/* Capabilities */}
+          <Section title={t("info.capabilities")}>
+            <div className="text-[12.5px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              register · notify · ask · status · inbox
+            </div>
+          </Section>
+
+          {/* Open / resume the agent's session in a terminal */}
+          {session.workPath && (
+            <Section title={t("info.openSession")}>
+              <OpenSessionRow session={session} />
+            </Section>
+          )}
+
           {/* Management: archive (reversible) and delete (permanent). */}
           <Section title={t("profile.manage")}>
             <div className="flex flex-wrap items-center gap-2">
@@ -640,15 +680,79 @@ function ContactProfile({
         </div>
       </div>
 
-      {/* Action bar */}
-      <div className="flex items-center justify-center border-t px-8 py-4" style={{ borderColor: "var(--border)" }}>
-        <button
-          onClick={() => onMessage(session.id)}
-          className="inline-flex items-center gap-2 rounded-xl px-6 py-2.5 text-[13.5px] font-semibold transition-colors"
-          style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
+      {/* Action bar — only on the Contacts page (in the chat panel you're already here). */}
+      {onMessage && (
+        <div className="flex items-center justify-center border-t px-8 py-4" style={{ borderColor: "var(--border)" }}>
+          <button
+            onClick={() => onMessage(session.id)}
+            className="inline-flex items-center gap-2 rounded-xl px-6 py-2.5 text-[13.5px] font-semibold transition-colors"
+            style={{ color: "#fff", background: "var(--accent)", border: "1px solid var(--accent)" }}
+          >
+            <MessageSquare size={15} />
+            {t("profile.message")}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function resumeCommand(session: {
+  runtime: string;
+  workPath: string;
+  nativeSessionId?: string | null;
+}): string {
+  const sid = session.nativeSessionId;
+  if (session.runtime === "claude-code" || session.runtime === "claude") {
+    return `cd "${session.workPath}" && claude ${sid ? `--resume ${sid}` : "--continue"}`;
+  }
+  if (session.runtime === "codex") {
+    return `cd "${session.workPath}" && codex${sid ? ` resume ${sid}` : ""}`;
+  }
+  return `cd "${session.workPath}"`;
+}
+
+function OpenSessionRow({
+  session,
+}: {
+  session: { runtime: string; workPath: string; nativeSessionId?: string | null };
+}) {
+  const { t } = useI18n();
+  const [copied, setCopied] = useState(false);
+  const cmd = resumeCommand(session);
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+        {t("info.openSessionDesc")}
+      </p>
+      <div
+        className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+        style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}
+      >
+        <Terminal size={12} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+        <code
+          className="min-w-0 flex-1 truncate text-[11px]"
+          style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}
+          title={cmd}
         >
-          <MessageSquare size={15} />
-          {t("profile.message")}
+          {cmd}
+        </code>
+        <button
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(cmd);
+              setCopied(true);
+              window.setTimeout(() => setCopied(false), 2000);
+            } catch { /* ignore */ }
+          }}
+          aria-label={copied ? t("info.openSessionCopied") : t("info.openSession")}
+          title={copied ? t("info.openSessionCopied") : t("info.openSession")}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+          style={{ color: copied ? "var(--green)" : "var(--text-muted)" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+        >
+          {copied ? <Check size={12} /> : <Copy size={12} />}
         </button>
       </div>
     </div>

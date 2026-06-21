@@ -6,6 +6,8 @@ import {
   Folder,
   MessageSquareText,
   MoreVertical,
+  PanelLeftClose,
+  PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
@@ -30,6 +32,8 @@ interface Props {
   canToggleInfo?: boolean;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
+  listOpen?: boolean;
+  onToggleList?: () => void;
 }
 
 export function ConversationHeader({
@@ -42,6 +46,8 @@ export function ConversationHeader({
   canToggleInfo,
   terminalOpen,
   onToggleTerminal,
+  listOpen,
+  onToggleList,
 }: Props) {
   const { t } = useI18n();
   const { renameSession, setArchived } = useStore();
@@ -66,6 +72,20 @@ export function ConversationHeader({
           style={{ color: "var(--text-secondary)" }}
         >
           <ChevronLeft size={20} />
+        </button>
+      )}
+
+      {onToggleList && (
+        <button
+          onClick={onToggleList}
+          aria-label={listOpen ? t("conv.hideList") : t("conv.showList")}
+          title={listOpen ? t("conv.hideList") : t("conv.showList")}
+          className="hidden md:flex h-9 w-9 shrink-0 items-center justify-center rounded-lg"
+          style={{ color: "var(--text-secondary)", background: "var(--surface-card)", border: "1px solid var(--border)" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface-card)"; }}
+        >
+          {listOpen ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
         </button>
       )}
 

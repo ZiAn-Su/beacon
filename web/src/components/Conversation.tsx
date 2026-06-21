@@ -17,6 +17,8 @@ interface Props {
   infoOpen?: boolean;
   onToggleInfo?: () => void;
   canToggleInfo?: boolean;
+  listOpen?: boolean;
+  onToggleList?: () => void;
 }
 
 export function Conversation({
@@ -27,6 +29,8 @@ export function Conversation({
   infoOpen,
   onToggleInfo,
   canToggleInfo,
+  listOpen,
+  onToggleList,
 }: Props) {
   const { messagesBySession, loadingMessages, ensureSessionMessages, send } = useStore();
   const { t } = useI18n();
@@ -79,6 +83,8 @@ export function Conversation({
         canToggleInfo={canToggleInfo}
         terminalOpen={terminalOpen}
         onToggleTerminal={() => setTerminalOpen((v) => !v)}
+        listOpen={listOpen}
+        onToggleList={onToggleList}
       />
 
       {terminalOpen ? (

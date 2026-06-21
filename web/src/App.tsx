@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bell, BellOff, Moon, PanelLeftOpen, Sun, X } from "lucide-react";
+import { Bell, BellOff, Moon, Sun, X } from "lucide-react";
 import { Rail } from "./components/Rail";
 import { Resizer } from "./components/Resizer";
 import { ContactList } from "./components/ContactList";
-import { ContactsView } from "./components/ContactsView";
+import { ContactsView, ContactProfile } from "./components/ContactsView";
 import { Conversation } from "./components/Conversation";
-import { SessionInfo } from "./components/SessionInfo";
 import { EmptyState } from "./components/EmptyState";
 import { ConnectAgentModal } from "./components/ConnectAgentModal";
 import { AddAgentModal } from "./components/AddAgentModal";
@@ -282,8 +281,10 @@ function Shell() {
 
       {view === "chats" ? (
         <>
-          {/* Left column: Contact list — full-screen on mobile; resizable & collapsible on >=md. */}
-          {listOpen ? (
+          {/* Left column: Contact list — full-screen on mobile; resizable on >=md.
+              Collapsing (desktop) hides it entirely; re-open from the conversation
+              header. Always shown when nothing is selected, to avoid a dead-end. */}
+          {(listOpen || !selected) && (
             <>
               <div
                 className={
@@ -299,27 +300,10 @@ function Shell() {
                   selectedId={selectedId}
                   onSelect={(id) => setSelectedId(id)}
                   onConnectAgent={() => setConnectOpen(true)}
-                  onCollapse={() => setListOpen(false)}
                 />
               </div>
               <Resizer onResize={resizeList} ariaLabel={t("app.resizeList")} />
             </>
-          ) : (
-            // Collapsed: a slim strip with an expand button (desktop only).
-            <div
-              className="hidden md:flex h-full w-9 shrink-0 flex-col items-center border-r py-3"
-              style={{ borderColor: "var(--border)", background: "var(--bg-sidebar)" }}
-            >
-              <button
-                onClick={() => setListOpen(true)}
-                aria-label={t("app.showList")}
-                title={t("app.showList")}
-                className="flex h-8 w-8 items-center justify-center rounded-lg"
-                style={{ color: "var(--text-secondary)" }}
-              >
-                <PanelLeftOpen size={16} />
-              </button>
-            </div>
           )}
 
           {/* Center column: Conversation. */}
@@ -339,6 +323,8 @@ function Shell() {
                 infoOpen={infoOpen}
                 onToggleInfo={() => setInfoOpen((v) => !v)}
                 canToggleInfo
+                listOpen={listOpen}
+                onToggleList={() => setListOpen((v) => !v)}
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center">
@@ -350,7 +336,8 @@ function Shell() {
             )}
           </div>
 
-          {/* Right column: SessionInfo — resizable; toggled by the header (off by default). */}
+          {/* Right column: the shared contact detail (same panel as the Contacts
+              page, for symmetric info). Resizable; toggled by the header. */}
           {selected && infoOpen && (
             <>
               <Resizer onResize={resizeInfo} ariaLabel={t("app.resizeInfo")} />
@@ -358,7 +345,11 @@ function Shell() {
                 className="hidden md:block md:shrink-0 md:border-l"
                 style={{ borderColor: "var(--border)", width: `${infoW}px` }}
               >
-                <SessionInfo session={selected} now={now} />
+                <ContactProfile
+                  session={selected}
+                  sessions={sessions.filter((s) => s.archivedAt == null)}
+                  now={now}
+                />
               </div>
             </>
           )}
