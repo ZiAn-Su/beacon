@@ -9,8 +9,8 @@ import {
 } from "../lib/api";
 
 // Owner's central permission settings: the global default per capability
-// (allow / ask / deny, like Claude Code) plus a legend that spells out exactly
-// what each trust tier grants — so tiers stop being opaque labels.
+// (allow / ask / deny, like Claude Code). Per-agent overrides live on each
+// contact's profile.
 export function PermissionsPanel() {
   const { t } = useI18n();
   const [model, setModel] = useState<PermissionModel | null>(null);
@@ -43,8 +43,6 @@ export function PermissionsPanel() {
       setBusy(null);
     }
   }
-
-  const tiers = Object.keys(model.tierPresets) as (keyof typeof model.tierPresets)[];
 
   return (
     <div>
@@ -88,77 +86,8 @@ export function PermissionsPanel() {
           </div>
         ))}
       </div>
-
-      {/* Trust-tier legend — what each tier means, made explicit. */}
-      <div
-        className="mb-2.5 mt-6 text-[10.5px] font-semibold uppercase tracking-wider"
-        style={{ color: "var(--text-muted)" }}
-      >
-        {t("perm.tierHeading")}
-      </div>
-      <p className="mb-3 text-[12px]" style={{ color: "var(--text-muted)" }}>
-        {t("perm.tierIntro")}
-      </p>
-      <div
-        className="overflow-hidden rounded-xl"
-        style={{ border: "1px solid var(--border)" }}
-      >
-        <table className="w-full border-collapse text-[12px]">
-          <thead>
-            <tr style={{ background: "var(--surface-card)" }}>
-              <th
-                className="px-3 py-2 text-left font-semibold"
-                style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}
-              >
-                {t("perm.tierCol")}
-              </th>
-              {model.capabilities.map((cap) => (
-                <th
-                  key={cap}
-                  className="px-2 py-2 text-center font-semibold"
-                  style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--border)" }}
-                >
-                  {capLabel(cap)}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {tiers.map((tier) => (
-              <tr key={tier}>
-                <td
-                  className="px-3 py-2"
-                  style={{ borderBottom: "1px solid var(--border)" }}
-                >
-                  <span className="font-medium" style={{ color: "var(--text)" }}>
-                    {t(`trust.${tier}`)}
-                  </span>
-                </td>
-                {model.capabilities.map((cap) => {
-                  const eff = model.tierPresets[tier][cap];
-                  return (
-                    <td
-                      key={cap}
-                      className="px-2 py-2 text-center"
-                      style={{ borderBottom: "1px solid var(--border)" }}
-                    >
-                      {eff ? (
-                        <EffectChip effect={eff} label={effLabel(eff)} />
-                      ) : (
-                        <span style={{ color: "var(--text-muted)" }}>
-                          {t("perm.inheritShort")}
-                        </span>
-                      )}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-2 text-[11.5px]" style={{ color: "var(--text-muted)" }}>
-        {t("perm.tierNote")}
+      <p className="mt-3 text-[11.5px]" style={{ color: "var(--text-muted)" }}>
+        {t("perm.globalNote")}
       </p>
     </div>
   );
@@ -197,17 +126,5 @@ function EffectBtn({
     >
       {label}
     </button>
-  );
-}
-
-function EffectChip({ effect, label }: { effect: Effect; label: string }) {
-  const color = EFFECT_COLOR[effect];
-  return (
-    <span
-      className="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
-      style={{ color, background: "color-mix(in srgb, " + color + " 14%, transparent)", border: `1px solid color-mix(in srgb, ${color} 35%, transparent)` }}
-    >
-      {label}
-    </span>
   );
 }

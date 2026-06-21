@@ -14,11 +14,10 @@ import { dirname, join } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
-import { SESSION_STATUSES, TRUST_TIERS } from '../core/types';
+import { SESSION_STATUSES } from '../core/types';
 import {
   CAPABILITIES,
   EFFECTS,
-  TIER_PRESETS,
   isCapability,
   isEffect,
 } from '../core/permissions';
@@ -441,14 +440,13 @@ app.delete('/api/grants/:id', (req: Request, res: Response) => {
 });
 
 // --- owner permission model (capabilities) ---
-// Everything the UI needs to render the permission panel and tier legend: the
-// capability set, the three effects, what each trust tier grants (the legend
-// that makes tiers legible), the owner global defaults and the master switch.
+// Everything the UI needs to render the permission panel: the capability set,
+// the three effects, the owner global defaults and the agent-to-agent master
+// switch.
 app.get('/api/permissions', (_req: Request, res: Response) => {
   ok(res, {
     capabilities: CAPABILITIES,
     effects: EFFECTS,
-    tierPresets: TIER_PRESETS,
     globalDefaults: getSettings().permissions,
     agentComm: getSettings().agentComm,
   });
@@ -680,12 +678,8 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   if (!store.getSession(id)) return notFound(res);
   // ISS-008: 400 if no recognised fields provided (hides misspelled field names)
   const body = req.body ?? {};
-  if (!('title' in body) && !('description' in body) && typeof body.archived !== 'boolean' && !('trustTier' in body)) {
-    res.status(400).json({ error: 'no patchable fields in body; expected title, description, archived or trustTier' }); return;
-  }
-  // Validate trustTier up front so an invalid value is a 400, not a silent no-op.
-  if ('trustTier' in body && !(TRUST_TIERS as readonly string[]).includes(String(body.trustTier))) {
-    res.status(400).json({ error: `invalid trustTier; must be one of: ${TRUST_TIERS.join(', ')}` }); return;
+  if (!('title' in body) && !('description' in body) && typeof body.archived !== 'boolean') {
+    res.status(400).json({ error: 'no patchable fields in body; expected title, description or archived' }); return;
   }
   let session = store.getSession(id)!;
   if ('title' in (req.body ?? {})) {
@@ -698,9 +692,6 @@ app.patch('/api/sessions/:id', (req: Request, res: Response) => {
   }
   if (typeof req.body?.archived === 'boolean') {
     session = store.setArchived(id, req.body.archived) ?? session;
-  }
-  if ('trustTier' in body) {
-    session = store.setTrustTier(id, String(body.trustTier)) ?? session;
   }
   ok(res, { session });
 });

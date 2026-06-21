@@ -56,7 +56,6 @@ interface StoreState {
     ids: string[],
     action: "archive" | "unarchive" | "delete",
   ) => Promise<void>;
-  setSessionTrustTier: (sessionId: string, trustTier: string) => Promise<void>;
   startAgent: (sessionId: string, text: string) => Promise<string>;
   settings: AppSettings | null;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
@@ -365,14 +364,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [upsertSession],
   );
 
-  const setSessionTrustTier = useCallback(
-    async (sessionId: string, trustTier: string) => {
-      const session = await patchSession(sessionId, { trustTier });
-      upsertSession(session);
-    },
-    [upsertSession],
-  );
-
   const deleteSession = useCallback(async (sessionId: string) => {
     // Optimistic local removal; the WS 'session-removed' event reconciles too.
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
@@ -413,7 +404,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       renameSession,
       setSessionDescription,
       setArchived,
-      setSessionTrustTier,
       deleteSession,
       batchSessions,
       startAgent,
@@ -438,7 +428,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       renameSession,
       setSessionDescription,
       setArchived,
-      setSessionTrustTier,
       deleteSession,
       batchSessions,
       startAgent,

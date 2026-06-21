@@ -175,15 +175,12 @@ export async function startAgent(sessionId: string, text: string): Promise<strin
 // ---- owner permission model (capabilities) ----
 export type Capability = "contact_agent" | "register_agent" | "spawn_agent";
 export type Effect = "allow" | "ask" | "deny";
-export type TrustTier = "restricted" | "standard" | "trusted" | "autonomous";
 
 // Everything the permission panel needs: the capability set, the three effects,
-// each tier's effect per capability (the legend that makes tiers legible), the
-// owner global defaults, and the agent-to-agent master switch.
+// the owner global defaults, and the agent-to-agent master switch.
 export interface PermissionModel {
   capabilities: Capability[];
   effects: Effect[];
-  tierPresets: Record<TrustTier, Partial<Record<Capability, Effect>>>;
   globalDefaults: Record<Capability, Effect>;
   agentComm: "open" | "off";
 }
@@ -322,7 +319,7 @@ export async function batchSessions(
 /** Rename and/or archive a conversation (PATCH /api/sessions/:id). */
 export async function patchSession(
   sessionId: string,
-  body: { title?: string | null; description?: string | null; archived?: boolean; trustTier?: string },
+  body: { title?: string | null; description?: string | null; archived?: boolean },
 ): Promise<Session> {
   const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, {
     method: "PATCH",

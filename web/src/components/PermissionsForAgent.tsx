@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import type { TrustTier } from "../types";
 import { useI18n } from "../lib/i18n";
 import {
   getAgentPolicies,
@@ -10,19 +9,11 @@ import {
   type PermissionModel,
 } from "../lib/api";
 
-// Per-contact permission view, shown under the trust tier. Two jobs:
-//  1. Make the tier legible: a chip per capability showing what THIS tier grants,
-//     so switching tiers visibly changes the outcome (answers "what's the
-//     difference?").
-//  2. The single-agent override layer: pin a capability for just this agent to
-//     allow/ask/deny, beating the tier preset. "Default" clears it.
-export function PermissionsForAgent({
-  sessionId,
-  tier,
-}: {
-  sessionId: string;
-  tier: TrustTier;
-}) {
+// Per-contact permission control. For each capability it shows the effect in
+// force for this agent (its override, or the owner global default) and lets you
+// pin an override for just this agent: allow / ask / deny, or Default to follow
+// the global setting.
+export function PermissionsForAgent({ sessionId }: { sessionId: string }) {
   const { t } = useI18n();
   const [model, setModel] = useState<PermissionModel | null>(null);
   const [overrides, setOverrides] = useState<Partial<Record<Capability, Effect>>>({});
@@ -46,8 +37,7 @@ export function PermissionsForAgent({
 
   if (!model) return null;
 
-  // Capabilities that actually vary by tier/agent here (register is decided at
-  // admission, before a tier exists — not meaningful per existing contact).
+  // register_agent is decided once at admission, not per established contact.
   const caps = model.capabilities.filter((c) => c !== "register_agent");
 
   async function choose(cap: Capability, effect: Effect | null) {
@@ -63,9 +53,8 @@ export function PermissionsForAgent({
   return (
     <div className="mt-3 flex flex-col gap-2">
       {caps.map((cap) => {
-        const preset = model.tierPresets[tier]?.[cap];
         const override = overrides[cap] ?? null;
-        const effective = override ?? preset ?? model.globalDefaults[cap];
+        const effective = override ?? model.globalDefaults[cap];
         return (
           <div
             key={cap}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, ArchiveRestore, BookUser, Check, CheckSquare, Copy, History, MessageSquare, Pencil, Play, Plus, Search, Square, Terminal, Trash2, User, X } from "lucide-react";
-import type { Session, TrustTier } from "../types";
+import type { Session } from "../types";
 import {
   createGrant,
   deleteGrant,
@@ -14,8 +14,6 @@ import { PermissionsForAgent } from "./PermissionsForAgent";
 import { absoluteTime, isOnline, isVisibleScope, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useStore } from "../lib/store";
-
-const TRUST_TIERS: TrustTier[] = ["restricted", "standard", "trusted", "autonomous"];
 
 const STATUS_COLOR: Record<Session["status"], string> = {
   registered: "var(--color-registered)",
@@ -379,13 +377,12 @@ export function ContactProfile({
   now?: number;
 }) {
   const { t, rel } = useI18n();
-  const { setSessionTrustTier, renameSession, setSessionDescription, setArchived, deleteSession } = useStore();
+  const { renameSession, setSessionDescription, setArchived, deleteSession } = useStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const nowMs = now ?? Date.now();
   const label = pathBase(session.workPath) || session.runtime;
   const title = sessionName(session, label);
   const online = isOnline(session, nowMs);
-  const tier = session.trustTier ?? "standard";
   // Show the current task as a subtitle only when a distinct display name exists
   // (otherwise the name already *is* the task and we'd print it twice).
   const taskLine = session.task?.trim();
@@ -510,30 +507,9 @@ export function ContactProfile({
 
           <div className="my-6 h-px w-full" style={{ background: "var(--border)" }} />
 
-          {/* Trust tier — segmented control + the selected tier's meaning. */}
-          <Section title={t("profile.trust")}>
-            <div className="inline-flex rounded-lg p-0.5" style={{ background: "var(--surface-card)", border: "1px solid var(--border)" }}>
-              {TRUST_TIERS.map((tt) => {
-                const a = tier === tt;
-                return (
-                  <button
-                    key={tt}
-                    onClick={() => void setSessionTrustTier(session.id, tt)}
-                    className="rounded-md px-3 py-1 text-[12px] font-medium transition-colors"
-                    style={{
-                      color: a ? "#fff" : "var(--text-secondary)",
-                      background: a ? "var(--accent)" : "transparent",
-                    }}
-                  >
-                    {t(`trust.${tt}`)}
-                  </button>
-                );
-              })}
-            </div>
-            <p className="mt-2.5 text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-              {t(`trust.${tier}Desc`)}
-            </p>
-            <PermissionsForAgent sessionId={session.id} tier={tier} />
+          {/* Per-agent permissions: effective effect + override per capability. */}
+          <Section title={t("profile.permissions")}>
+            <PermissionsForAgent sessionId={session.id} />
           </Section>
 
           {/* Its address book: who it can reach / request, with status + actions. */}

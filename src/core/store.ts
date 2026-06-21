@@ -20,7 +20,7 @@ import type {
   GrantEffect,
   ContactRequest,
 } from './types';
-import { SESSION_STATUSES, TRUST_TIERS } from './types';
+import { SESSION_STATUSES } from './types';
 import { getSettings } from './settings';
 import {
   resolveEffect,
@@ -604,24 +604,6 @@ export function deleteSession(id: string): boolean {
   }
   bus.emit('sessionRemoved', id);
   return true;
-}
-
-const updateSessionTrustTier = db.prepare(
-  `UPDATE sessions SET trustTier = @trustTier, updatedAt = @updatedAt WHERE id = @id`
-);
-
-/**
- * Set a session's trust tier (authorization graduation). Rejects an unknown
- * tier by returning the session unchanged. Emits a session event on success.
- */
-export function setTrustTier(id: string, tier: string): Session | undefined {
-  const s = getSession(id);
-  if (!s) return undefined;
-  if (!(TRUST_TIERS as string[]).includes(tier)) return s;
-  updateSessionTrustTier.run({ id, trustTier: tier, updatedAt: now() });
-  const updated = getSession(id)!;
-  bus.emit('session', updated);
-  return updated;
 }
 
 // ---------- presence ----------
@@ -1357,10 +1339,10 @@ export function decideSpawnRequest(askId: string, approve: boolean): void {
  *   0. acting agent not admitted (and not asking to register) -> deny.
  *   1. contact_agent: per-pair grant, then the visible-scope rule (see below).
  *   2. per-agent override.
- *   3. trust-tier preset.
- *   4. owner global default.
- * For contact_agent, an in-scope target uses the tier/global effect, while an
- * out-of-scope target is denied unless an explicit allow-grant opens that edge.
+ *   3. owner global default.
+ * For contact_agent, an in-scope target (same work directory) uses the
+ * override/global effect, while an out-of-scope target is denied unless an
+ * explicit per-pair grant (or override) opens that edge.
  */
 export function resolveCapability(
   agentId: string,
@@ -1372,7 +1354,6 @@ export function resolveCapability(
   // A quarantined agent can do nothing until admitted.
   if (agent.admittedAt == null) return 'deny';
 
-  const tier = agent.trustTier ?? 'standard';
   const override = getAgentPolicy(agentId, capability);
   const globalDefault = getSettings().permissions[capability] ?? 'ask';
 
@@ -1383,14 +1364,12 @@ export function resolveCapability(
       if (grant) return grant.effect; // allow | deny
       const to = getSession(targetId);
       if (!to || to.admittedAt == null) return 'deny';
-      // Out-of-scope targets need an explicit grant (handled above); deny here.
-      if (!override && !isVisibleScope(agent.workPath, to.workPath)) {
-        return tier === 'autonomous' ? 'allow' : 'deny';
-      }
+      // Out-of-scope targets need an explicit grant or override; deny otherwise.
+      if (!override && !isVisibleScope(agent.workPath, to.workPath)) return 'deny';
     }
   }
 
-  return resolveEffect({ capability, tier, agentOverride: override, globalDefault });
+  return resolveEffect({ agentOverride: override, globalDefault });
 }
 
 // Normalize a work path for scope comparison: unify slashes, drop trailing

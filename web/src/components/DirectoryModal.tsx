@@ -195,7 +195,6 @@ export function DirectoryModal({ open, onClose, onSelect }: Props) {
                 const label = pathBase(a.workPath) || a.runtime;
                 const title = sessionName(a, label);
                 const online = isOnline(a, Date.now());
-                const tier = a.trustTier ?? "standard";
                 return (
                   <li key={a.id} className="flex items-center gap-1">
                     <button
@@ -248,17 +247,6 @@ export function DirectoryModal({ open, onClose, onSelect }: Props) {
                           <span className="truncate">{a.workPath || "—"}</span>
                         </div>
                       </div>
-                      <span
-                        className="shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium"
-                        style={{
-                          color: tier === "restricted" ? "var(--danger)" : "var(--text-secondary)",
-                          background: "var(--bg-sidebar)",
-                          border: "1px solid var(--border)",
-                        }}
-                        title={t("dir.trustHint")}
-                      >
-                        {t(`trust.${tier}`)}
-                      </span>
                     </button>
                     {confirmId === a.id ? (
                       <div className="flex shrink-0 items-center gap-1">

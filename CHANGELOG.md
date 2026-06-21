@@ -3,6 +3,20 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.7.1] - 2026-06-21
+
+### 改进 —— 去除信任档位,只保留按能力的权限控制
+
+信任档位(restricted/standard/trusted/autonomous)和按能力的 `allow/ask/deny` 是在重复表达同一件
+事,且档位不直观。**移除档位**,判定层从「按对 > 单agent覆盖 > 档位 > 全局默认」收敛为
+**「按对授权 > 单智能体覆盖 > 全局默认」**:
+
+- 设置「权限」面板去掉档位图例,只留全局默认(每项能力 allow/ask/deny)。
+- 联系人资料页「信任档位」整段换成「权限」:每项能力显示**当前生效结果** + 单智能体覆盖
+  (默认/允许/询问/拒绝)。
+- 后端 `resolveCapability` 不再读档位;移除 `setTrustTier` 与 PATCH `trustTier`、`/api/permissions`
+  的 `tierPresets`。`sessions.trustTier` 列保留(向后兼容,不再使用)。
+
 ## [0.7.0] - 2026-06-21
 
 ### 新增 —— Owner 多级权限管理(参考 Claude Code 的 allow/ask/deny)
