@@ -3,6 +3,14 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.7.4] - 2026-06-21
+
+### 修复 —— 添加智能体的运行时选项重新可见(下拉 + 自定义)
+
+v0.7.3 把运行时选择器临时做成了可输入框(datalist),不点开看不到选项。改回**可见下拉**:
+`claude-code`、`codex`、`ccs:mm`、`ccs:ark`、以及「自定义…」——选「自定义」才展开文本框填任意
+`ccs:<档位>`。原生的 claude-code / codex 始终在列。
+
 ## [0.7.3] - 2026-06-21
 
 ### 新增 —— 多模型运行时:ccs(Claude Code + 供应商路由),支持 minimax m3 等

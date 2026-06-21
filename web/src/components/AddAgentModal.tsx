@@ -18,16 +18,21 @@ interface Props {
   defaultPath?: string;
 }
 
-// Suggestions for the runtime combobox. Free text is allowed (e.g. any ccs
-// profile like `ccs:ark`), so this is a datalist, not a closed dropdown. `ccs:*`
-// runs Claude Code routed to another model (mm = minimax m3, ark = …).
-const RUNTIMES = ["claude-code", "codex", "ccs:mm", "ccs:ark"] as const;
+// Known runtimes shown in the dropdown. The original claude-code / codex stay
+// first; ccs:* runs Claude Code routed to another model (mm = minimax m3, ark =
+// …). A "custom" entry reveals a text box for any other ccs:<profile>.
+const KNOWN_RUNTIMES = ["claude-code", "codex", "ccs:mm", "ccs:ark"] as const;
+const CUSTOM = "__custom__";
 const POLL_MS = 4000;
 
 export function AddAgentModal({ open, onClose, onAdded, defaultPath }: Props) {
   const { t } = useI18n();
   const [path, setPath] = useState(defaultPath ?? "");
   const [runtime, setRuntime] = useState<string>("claude-code");
+  // When the chosen runtime isn't one of the known ones, the dropdown shows
+  // "custom" and a text box edits the value directly.
+  const [customMode, setCustomMode] = useState(false);
+  const showCustom = customMode || !(KNOWN_RUNTIMES as readonly string[]).includes(runtime);
   const [found, setFound] = useState<DiscoveredSession[]>([]);
   const [scanning, setScanning] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -184,19 +189,36 @@ export function AddAgentModal({ open, onClose, onAdded, defaultPath }: Props) {
                   style={{ color: "var(--text)" }}
                 />
               </div>
-              <input
-                list="beacon-runtimes"
-                value={runtime}
-                onChange={(e) => setRuntime(e.target.value)}
-                spellCheck={false}
-                className="w-32 rounded-lg px-2 py-1.5 font-mono text-[12.5px] outline-none"
+              <select
+                value={showCustom ? CUSTOM : runtime}
+                onChange={(e) => {
+                  if (e.target.value === CUSTOM) {
+                    setCustomMode(true);
+                    if ((KNOWN_RUNTIMES as readonly string[]).includes(runtime)) setRuntime("ccs:");
+                  } else {
+                    setCustomMode(false);
+                    setRuntime(e.target.value);
+                  }
+                }}
+                className="rounded-lg px-2 py-1.5 text-[12.5px] outline-none"
                 style={{ background: "var(--bg-sidebar)", color: "var(--text)", border: "1px solid var(--border)" }}
-              />
-              <datalist id="beacon-runtimes">
-                {RUNTIMES.map((r) => (
-                  <option key={r} value={r} />
+              >
+                {KNOWN_RUNTIMES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
                 ))}
-              </datalist>
+                <option value={CUSTOM}>{t("addAgent.runtimeCustom")}</option>
+              </select>
+              {showCustom && (
+                <input
+                  value={runtime}
+                  onChange={(e) => setRuntime(e.target.value)}
+                  spellCheck={false}
+                  autoFocus
+                  placeholder="ccs:<profile>"
+                  className="w-28 rounded-lg px-2 py-1.5 font-mono text-[12.5px] outline-none"
+                  style={{ background: "var(--bg-sidebar)", color: "var(--text)", border: "1px solid var(--border)" }}
+                />
+              )}
             </div>
           </div>
 
