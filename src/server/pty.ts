@@ -16,6 +16,18 @@ import * as pty from 'node-pty';
 import { URL } from 'node:url';
 import * as store from '../core/store';
 import { ccsProfile } from './runtimes';
+import { getSettings } from '../core/settings';
+
+// Claude (and ccs, which is Claude under the hood) permission modes. A launched
+// terminal agent must run under the owner's chosen mode (default
+// bypassPermissions) — otherwise it stalls on a "Do you want to proceed?" prompt
+// for every tool call, invisibly to the human on Beacon. wake.ts already passes
+// this for relaunch; the PTY launch must too.
+const CLAUDE_PERM_MODES = ['bypassPermissions', 'acceptEdits', 'default', 'plan'];
+function permFlag(): string {
+  const m = getSettings().startPermission;
+  return CLAUDE_PERM_MODES.includes(m) ? ` --permission-mode ${m}` : '';
+}
 
 const isWin = process.platform === 'win32';
 
@@ -151,19 +163,20 @@ function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boo
       ? { file: 'cmd.exe', args: ['/k', cmd] }
       : { file: process.env.SHELL ?? 'bash', args: ['-c', `exec ${cmd}`] };
 
+  const perm = permFlag(); // non-blocking permission mode so it doesn't stall
   if (runtime === 'claude-code' || runtime === 'claude') {
     // Fresh launch -> a new conversation. Otherwise resume the EXACT conversation
     // when the platform knows its native id; else the most recent in the work dir.
-    if (fresh) return wrap('claude');
-    return wrap(nativeSessionId ? `claude --resume ${nativeSessionId}` : 'claude --continue');
+    if (fresh) return wrap(`claude${perm}`);
+    return wrap((nativeSessionId ? `claude --resume ${nativeSessionId}` : 'claude --continue') + perm);
   }
   // ccs:<profile> -> Claude Code routed to another model (minimax m3, ark, …).
-  // ccs forwards claude args, so resume/continue work identically.
+  // ccs forwards claude args, so resume/continue + permission mode work identically.
   const profile = ccsProfile(runtime);
   if (profile) {
     const base = `ccs ${profile}`;
-    if (fresh) return wrap(base);
-    return wrap(nativeSessionId ? `${base} --resume ${nativeSessionId}` : `${base} --continue`);
+    if (fresh) return wrap(`${base}${perm}`);
+    return wrap((nativeSessionId ? `${base} --resume ${nativeSessionId}` : `${base} --continue`) + perm);
   }
   if (runtime === 'codex') return wrap('codex');
 

@@ -3,6 +3,20 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.7.5] - 2026-06-21
+
+### 修复 —— 拉起的终端 agent 不再卡在权限弹窗;消息送达后状态可见
+
+实战暴露:用 UI/launch 拉起的 `ccs mm`(Claude Code)在每条命令上都弹「Do you want to proceed?」
+确认框,卡死不动,而**人在 Beacon 这边完全看不到它被卡住**——对话像石沉大海。
+
+- **`pty.ts` 拉起时传 `--permission-mode`**(取 settings.startPermission,默认 bypassPermissions),
+  和 `wake.ts` 唤醒一致。终端 agent 不再逐命令阻塞。覆盖 claude / ccs:<档位>。
+- **消息送达即置 `working`**:消息成功打进活跃终端后,网关把该会话状态置为 working,人不再对着
+  一个"没反应"的联系人发呆;agent 自己的 update_status / notify 再细化。
+
+仍待做(已记):终端 agent 的实时活动/被阻塞状态向 Beacon 的更完整可视化。
+
 ## [0.7.4] - 2026-06-21
 
 ### 修复 —— 添加智能体的运行时选项重新可见(下拉 + 自定义)

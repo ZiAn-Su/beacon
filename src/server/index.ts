@@ -607,6 +607,13 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   } else {
     agent = 'queued'; // runtime we can't launch (rare)
   }
+  // Visibility: once a message reaches a live terminal agent, reflect that it's
+  // active so the human isn't staring at a silent contact. A terminal agent
+  // doesn't self-report status, so the gateway supplies this signal; the agent's
+  // own update_status / notify refine it from there.
+  if (!isAskAnswer && agent !== 'queued' && session.status !== 'working') {
+    store.setStatus(session.id, 'working');
+  }
   ok(res, { message, agent });
 });
 
