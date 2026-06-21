@@ -3,6 +3,7 @@ import { Bell, BellOff, Languages, Moon, Settings as SettingsIcon, Sun, X } from
 import { useStore } from "../lib/store";
 import { useI18n } from "../lib/i18n";
 import type { AppSettings } from "../lib/api";
+import { PermissionsPanel } from "./PermissionsPanel";
 
 interface Props {
   open: boolean;
@@ -57,7 +58,7 @@ export function SettingsModal({ open, onClose, theme, onToggleTheme, notifPermis
       }}
     >
       <div
-        className="w-full max-w-[480px] overflow-hidden rounded-2xl"
+        className="w-full max-w-[560px] overflow-hidden rounded-2xl"
         style={{
           background: "var(--surface-card)",
           color: "var(--text)",
@@ -84,7 +85,7 @@ export function SettingsModal({ open, onClose, theme, onToggleTheme, notifPermis
           </button>
         </div>
 
-        <div className="px-5 py-5">
+        <div className="overflow-y-auto px-5 py-5" style={{ maxHeight: "min(72vh, 760px)" }}>
           <div
             className="mb-2.5 text-[10.5px] font-semibold uppercase tracking-wider"
             style={{ color: "var(--text-muted)" }}
@@ -176,6 +177,9 @@ export function SettingsModal({ open, onClose, theme, onToggleTheme, notifPermis
               );
             })}
           </div>
+
+          {/* Owner permission model: global capability defaults + tier legend. */}
+          <PermissionsPanel />
 
           {/* Appearance + language + notifications — consolidated here from the rail. */}
           <div

@@ -1,6 +1,6 @@
 {
   "name": "beacon",
-  "version": "0.6.12",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "description": "Beacon: humans and AI agents talk over a neutral, runtime-agnostic bus. Agents plug in via MCP; the human side reuses a mature IM (Matrix/Element) or a built-in dev console.",

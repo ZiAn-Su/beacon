@@ -29,6 +29,9 @@ export interface Session {
   origin?: "agent" | "human";
   // The runtime's own session id, when reported. Enables precise `--resume`.
   nativeSessionId?: string | null;
+  // When the owner admitted this agent as a live contact. null = quarantined,
+  // pending the owner's decision. Optional for forward-compat (defaults admitted).
+  admittedAt?: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -50,6 +53,11 @@ export interface Message {
     // Present when this ask backs an agent-initiated contact request; the UI
     // renders a localized approval card and the approve/deny option tokens.
     contactRequest?: { fromId: string; toId: string; reason?: string | null };
+    // Present when this ask backs a register admission (an agent awaiting the
+    // owner's decision before it goes live).
+    admissionRequest?: { agentId: string };
+    // Present when this ask backs an agent-initiated spawn request.
+    spawnRequest?: { spawnerId: string; workPath: string; runtime: string; name?: string | null; task?: string | null };
   } | null;
   createdAt: number;
   deliveredAt: number | null;

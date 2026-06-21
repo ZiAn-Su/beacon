@@ -172,11 +172,109 @@ export async function startAgent(sessionId: string, text: string): Promise<strin
   return data.result;
 }
 
+// ---- owner permission model (capabilities) ----
+export type Capability = "contact_agent" | "register_agent" | "spawn_agent";
+export type Effect = "allow" | "ask" | "deny";
+export type TrustTier = "restricted" | "standard" | "trusted" | "autonomous";
+
+// Everything the permission panel needs: the capability set, the three effects,
+// each tier's effect per capability (the legend that makes tiers legible), the
+// owner global defaults, and the agent-to-agent master switch.
+export interface PermissionModel {
+  capabilities: Capability[];
+  effects: Effect[];
+  tierPresets: Record<TrustTier, Partial<Record<Capability, Effect>>>;
+  globalDefaults: Record<Capability, Effect>;
+  agentComm: "open" | "off";
+}
+
+export async function getPermissions(): Promise<PermissionModel> {
+  const r = await fetch("/api/permissions");
+  return json<PermissionModel>(r);
+}
+
+// The capability set + tier presets are static for a running platform; cache them
+// so per-contact profiles don't refetch. Global defaults can change, so callers
+// that need the live defaults use getPermissions() directly.
+let _permCache: Promise<PermissionModel> | null = null;
+export function getPermissionsCached(): Promise<PermissionModel> {
+  if (!_permCache) _permCache = getPermissions();
+  return _permCache;
+}
+
+/** Per-agent capability override (null effect clears it). */
+export async function setAgentPolicy(
+  sessionId: string,
+  capability: Capability,
+  effect: Effect | null,
+): Promise<Partial<Record<Capability, Effect>>> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/policy`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ capability, effect }),
+  });
+  return (await json<{ policies: Partial<Record<Capability, Effect>> }>(r)).policies;
+}
+
+export async function getAgentPolicies(
+  sessionId: string,
+): Promise<Partial<Record<Capability, Effect>>> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/policy`);
+  return (await json<{ policies: Partial<Record<Capability, Effect>> }>(r)).policies;
+}
+
+/** Agents quarantined pending the owner's admission decision. */
+export async function listAdmissions(): Promise<Session[]> {
+  const r = await fetch("/api/admissions");
+  return (await json<{ pending: Session[] }>(r)).pending;
+}
+
+export async function admitSession(
+  sessionId: string,
+  approve: boolean,
+): Promise<void> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/admit`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ approve }),
+  });
+  await json<unknown>(r);
+}
+
+export interface SpawnRequest {
+  id: string;
+  spawnerId: string;
+  askId: string;
+  params: { workPath: string; runtime: string; name?: string | null; task?: string | null };
+  status: "pending" | "approved" | "denied";
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+export async function listSpawnRequests(): Promise<SpawnRequest[]> {
+  const r = await fetch("/api/spawn-requests");
+  return (await json<{ pending: SpawnRequest[] }>(r)).pending;
+}
+
+export async function decideSpawnRequest(
+  askId: string,
+  approve: boolean,
+): Promise<void> {
+  const r = await fetch(`/api/spawn-requests/${encodeURIComponent(askId)}/decide`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ approve }),
+  });
+  await json<unknown>(r);
+}
+
 export interface AppSettings {
   autoStart: "ask" | "auto" | "off";
   startPermission: string;
   // Global master switch for agent-to-agent messaging.
   agentComm?: "open" | "off";
+  // Owner global capability defaults.
+  permissions?: Record<Capability, Effect>;
 }
 
 export async function getSettings(): Promise<AppSettings> {

@@ -3,6 +3,29 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.7.0] - 2026-06-21
+
+### 新增 —— Owner 多级权限管理(参考 Claude Code 的 allow/ask/deny)
+
+把原本零散的信任/授权机制抽象成一等公民的**多级权限引擎**,所有有边界的能力(联系智能体、
+注册智能体、拉起智能体,以及未来新增的能力)都必须经过 **owner 的设置**。
+
+- **三态 × 多级**:每个能力解析为 `allow / ask / deny`。判定顺序最具体者胜——
+  **按对授权 > 单智能体覆盖 > 信任档位预设 > 全局默认(默认 ask)**;`ask` 复用既有 ask/审批 UI,
+  转给 owner 现场批,可「仅此次 / 永久」。
+- **信任档位 = 能力预设,UI 摊开含义**:`restricted/standard/trusted/autonomous` 重定义为一张
+  能力预设表(`src/core/permissions.ts`,单一事实源);设置里新增「权限」面板,把每个档位对每项能力
+  的 allow/ask/deny 渲染成图例,**不再看不出档位含义与区别**。单个联系人资料页也内嵌该图例 +
+  单智能体覆盖控件。
+- **注册即准入(register_agent)**:新智能体注册默认 `ask`,先进**隔离**态(`admittedAt=null`)——
+  对同伴不可见、不能行动,owner 在智能体会话里看到「准入智能体？」卡片批准或拒绝后才上线。
+- **拉起智能体(spawn_agent)**:新增 MCP 工具 `spawn_agent` 与 `beacon.mjs spawn`,服务端按
+  `spawn_agent` 权限把关——`allow` 立即拉起、`deny` 拒绝、`ask` 转 owner 审批(批准后才真正启动)。
+- **数据/接口**:新增 `agent_policies / admission_requests / spawn_requests` 表与
+  `sessions.admittedAt` 列(附一次性向后兼容回填);网关新增 `/api/permissions`、
+  `/api/sessions/:id/policy`、`/api/admissions`、`/api/sessions/:id/admit`、
+  `/api/sessions/:id/spawn`、`/api/spawn-requests/*` 等端点。
+
 ## [0.6.12] - 2026-06-21
 
 ### 改进 —— 左列折叠不留空条；聊天信息栏与通讯录资料页合并为同一面板

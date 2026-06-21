@@ -55,6 +55,10 @@ export interface AgentOps {
     targetId: string,
     reason?: string | null,
   ): Promise<{ status: string; askId?: string }>;
+  spawn(
+    spawnerId: string,
+    params: { workPath: string; runtime?: string; name?: string | null; task?: string | null },
+  ): Promise<{ status: string; askId?: string; agentId?: string }>;
 }
 
 export interface AgentDefaults {
@@ -428,6 +432,54 @@ export function registerBeaconTools(
       return { content: [{ type: 'text', text: 'Answered.' }] };
     },
   );
+
+  server.registerTool(
+    'spawn_agent',
+    {
+      title: 'Launch a new agent',
+      description:
+        'Start a brand-new agent (its own task/working directory) that joins Beacon as a ' +
+        'contact. Subject to your guardian\'s spawn permission: it may run immediately, or BLOCK ' +
+        'until the human approves, or be refused. Returns the new agent\'s id when it launches.',
+      inputSchema: {
+        work_path: z.string().describe('Working directory for the new agent'),
+        runtime: z.string().optional().describe('Runtime, e.g. "claude-code" (default)'),
+        name: z.string().optional().describe('Display name for the new agent'),
+        task: z.string().optional().describe('What the new agent should work on'),
+      },
+    },
+    async ({ work_path, runtime, name, task }) => {
+      const id = await ensure();
+      const r = await ops.spawn(id, { workPath: work_path, runtime, name, task });
+      if (r.status === 'spawned') {
+        return {
+          content: [{ type: 'text', text: `Spawned agent ${r.agentId}.` }],
+        };
+      }
+      // 'pending' — the guardian must approve. Block on the backing ask.
+      const askId = r.askId!;
+      for (;;) {
+        const ask = await ops.waitAsk(askId, 25000);
+        if (ask.status === 'answered') {
+          const approved = (ask.answer ?? '').trim() === 'approve';
+          return {
+            content: [
+              {
+                type: 'text',
+                text: approved
+                  ? 'Approved — the new agent is launching.'
+                  : 'Denied by the guardian.',
+              },
+            ],
+          };
+        }
+        if (ask.status === 'cancelled') {
+          return { content: [{ type: 'text', text: 'The spawn request was dismissed.' }] };
+        }
+        // still pending — keep waiting
+      }
+    },
+  );
 }
 
 /**
@@ -586,6 +638,21 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         `/api/sessions/${fromId}/request-contact`,
         { method: 'POST', body: JSON.stringify({ targetId, reason }) },
       );
+    },
+    async spawn(spawnerId, params) {
+      const r = await api<{ status: string; askId?: string; session?: { id: string } }>(
+        `/api/sessions/${spawnerId}/spawn`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            workPath: params.workPath,
+            runtime: params.runtime ?? 'claude-code',
+            name: params.name ?? null,
+            task: params.task ?? null,
+          }),
+        },
+      );
+      return { status: r.status, askId: r.askId, agentId: r.session?.id };
     },
   };
 }

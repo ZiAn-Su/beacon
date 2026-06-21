@@ -10,6 +10,7 @@ import {
   type Grant,
 } from "../lib/api";
 import { Avatar } from "./Avatar";
+import { PermissionsForAgent } from "./PermissionsForAgent";
 import { absoluteTime, isOnline, isVisibleScope, pathBase, sessionName } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useStore } from "../lib/store";
@@ -532,6 +533,7 @@ export function ContactProfile({
             <p className="mt-2.5 text-[12px] leading-relaxed" style={{ color: "var(--text-secondary)" }}>
               {t(`trust.${tier}Desc`)}
             </p>
+            <PermissionsForAgent sessionId={session.id} tier={tier} />
           </Section>
 
           {/* Its address book: who it can reach / request, with status + actions. */}

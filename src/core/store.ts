@@ -22,6 +22,13 @@ import type {
 } from './types';
 import { SESSION_STATUSES, TRUST_TIERS } from './types';
 import { getSettings } from './settings';
+import {
+  resolveEffect,
+  isCapability,
+  isEffect,
+  type Capability,
+  type Effect,
+} from './permissions';
 
 const DB_PATH = process.env.BEACON_DB ?? 'data/beacon.db';
 mkdirSync(dirname(DB_PATH), { recursive: true });
@@ -87,6 +94,31 @@ CREATE TABLE IF NOT EXISTS contact_requests (
   decidedAt INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_cr_ask ON contact_requests(askId);
+CREATE TABLE IF NOT EXISTS agent_policies (
+  agentId TEXT NOT NULL,
+  capability TEXT NOT NULL,
+  effect TEXT NOT NULL,
+  PRIMARY KEY (agentId, capability)
+);
+CREATE TABLE IF NOT EXISTS admission_requests (
+  id TEXT PRIMARY KEY,
+  agentId TEXT NOT NULL,
+  askId TEXT NOT NULL,
+  status TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  decidedAt INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_admission_ask ON admission_requests(askId);
+CREATE TABLE IF NOT EXISTS spawn_requests (
+  id TEXT PRIMARY KEY,
+  spawnerId TEXT NOT NULL,
+  askId TEXT NOT NULL,
+  params TEXT NOT NULL,
+  status TEXT NOT NULL,
+  createdAt INTEGER NOT NULL,
+  decidedAt INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_spawn_ask ON spawn_requests(askId);
 `);
 
 // Additive migrations: bring older databases (created before a column existed)
@@ -111,6 +143,17 @@ ensureColumn('sessions', 'trustTier', 'TEXT');
 ensureColumn('sessions', 'nativeSessionId', 'TEXT');
 // Agent self-introduction (bio). NULL on old rows; defaulted at read time.
 ensureColumn('sessions', 'description', 'TEXT');
+// Admission timestamp. NULL means "pending the owner's decision" (quarantined).
+// When this column is first added, existing rows predate admission and must be
+// treated as already admitted, so backfill them once at migration time —
+// otherwise the new quarantine would retroactively hide every current contact.
+{
+  const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === 'admittedAt')) {
+    db.exec(`ALTER TABLE sessions ADD COLUMN admittedAt INTEGER`);
+    db.exec(`UPDATE sessions SET admittedAt = createdAt WHERE admittedAt IS NULL`);
+  }
+}
 // Identity Phase 3 — agent->agent peer messages. NULL on pre-existing rows and
 // on human/agent messages; only set for kind 'peer'. Defaulted at read time.
 ensureColumn('messages', 'fromSessionId', 'TEXT');
@@ -165,6 +208,7 @@ interface SessionRow {
   origin: string | null;
   guardianId: string | null;
   trustTier: string | null;
+  admittedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -208,6 +252,7 @@ function mapSession(r: SessionRow): Session {
     origin: r.origin === 'human' ? 'human' : 'agent',
     guardianId: r.guardianId ?? null,
     trustTier: (r.trustTier ?? 'standard') as TrustTier,
+    admittedAt: r.admittedAt ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -242,8 +287,8 @@ function mapAsk(r: AskRow): Ask {
 
 // ---------- sessions ----------
 const insertSession = db.prepare(
-  `INSERT INTO sessions (id, runtime, workPath, task, status, title, description, archivedAt, lastSeenAt, bindKey, nativeSessionId, origin, guardianId, trustTier, createdAt, updatedAt)
-   VALUES (@id, @runtime, @workPath, @task, @status, @title, @description, @archivedAt, @lastSeenAt, @bindKey, @nativeSessionId, @origin, @guardianId, @trustTier, @createdAt, @updatedAt)`
+  `INSERT INTO sessions (id, runtime, workPath, task, status, title, description, archivedAt, lastSeenAt, bindKey, nativeSessionId, origin, guardianId, trustTier, admittedAt, createdAt, updatedAt)
+   VALUES (@id, @runtime, @workPath, @task, @status, @title, @description, @archivedAt, @lastSeenAt, @bindKey, @nativeSessionId, @origin, @guardianId, @trustTier, @admittedAt, @createdAt, @updatedAt)`
 );
 const selectSession = db.prepare(`SELECT * FROM sessions WHERE id = ?`);
 const selectSessions = db.prepare(`SELECT * FROM sessions ORDER BY updatedAt DESC`);
@@ -284,6 +329,10 @@ export function createSession(input: {
   origin?: 'agent' | 'human';
   name?: string | null;
   description?: string | null;
+  // Whether the agent is admitted (a live contact) immediately. Defaults true.
+  // The register path passes false when register_agent resolves to 'ask', so the
+  // session lands quarantined in the admission tray until the owner approves.
+  admitted?: boolean;
 }): Session {
   const ts = now();
   const title = input.name && input.name.trim() ? input.name.trim() : null;
@@ -303,6 +352,7 @@ export function createSession(input: {
     origin: input.origin === 'human' ? 'human' : 'agent',
     guardianId: getOwner().id,
     trustTier: 'standard',
+    admittedAt: input.admitted === false ? null : ts,
     createdAt: ts,
     updatedAt: ts,
   };
@@ -430,8 +480,19 @@ export function registerOrClaim(input: {
   const pendId = takePendingLaunch(input.workPath);
   if (pendId && getSession(pendId)) return continueSession(pendId, input, native);
 
-  // 4. brand new
-  return createSession({ ...input, nativeSessionId: native });
+  // 4. brand new — gate admission through the owner's register_agent policy.
+  // 'allow' admits immediately; 'ask' quarantines and raises an owner approval;
+  // 'deny' quarantines silently (owner can still admit or delete from the tray).
+  // Either way nothing is admitted without the owner, and peers can't see or be
+  // contacted by a quarantined agent until then.
+  const admission = getSettings().permissions.register_agent;
+  const created = createSession({
+    ...input,
+    nativeSessionId: native,
+    admitted: admission === 'allow',
+  });
+  if (admission === 'ask') createAdmissionRequest(created.id);
+  return created;
 }
 
 export function setStatus(id: string, status: string): Session | undefined {
@@ -531,6 +592,8 @@ export function deleteSession(id: string): boolean {
     deleteSessionAsks.run(id);
     deleteSessionGrants.run(id, id);
     deleteSessionContactRequests.run(id, id);
+    deleteAgentPoliciesFor.run(id);
+    deleteAdmissionsFor.run(id);
     deleteSessionRow.run(id);
   });
   tx();
@@ -769,6 +832,8 @@ export function reply(
     // If this ask backs an agent-initiated contact request, record the decision
     // and mint the allow grant before unblocking the requester.
     settleContactRequestForAsk(askId!, text);
+    // If it backs an admission request, admit or remove the quarantined agent.
+    settleAdmissionForAsk(askId!, text);
     const session = getSession(sessionId);
     if (session && session.status === 'waiting') setStatus(sessionId, 'working');
     flushWaiters(getAsk(askId!)!);
@@ -1017,6 +1082,317 @@ function settleContactRequestForAsk(askId: string, answerText: string): void {
   if (approved) setGrant(cr.fromId, cr.toId, 'allow');
 }
 
+// ---------- agent policies (per-agent capability overrides) ----------
+// An override pins one capability for one agent to allow/ask/deny, beating the
+// trust-tier preset and the owner global default. Most specific after a per-pair
+// grant. Upserted by capability; clearing removes the row (back to tier/global).
+const upsertAgentPolicy = db.prepare(
+  `INSERT INTO agent_policies (agentId, capability, effect) VALUES (@agentId, @capability, @effect)
+   ON CONFLICT(agentId, capability) DO UPDATE SET effect = @effect`,
+);
+const deleteAgentPolicy = db.prepare(
+  `DELETE FROM agent_policies WHERE agentId = ? AND capability = ?`,
+);
+const deleteAgentPoliciesFor = db.prepare(`DELETE FROM agent_policies WHERE agentId = ?`);
+const selectAgentPolicy = db.prepare(
+  `SELECT effect FROM agent_policies WHERE agentId = ? AND capability = ?`,
+);
+const selectAgentPoliciesFor = db.prepare(
+  `SELECT capability, effect FROM agent_policies WHERE agentId = ?`,
+);
+
+/** Read one agent's override for a capability, or null if none. */
+export function getAgentPolicy(agentId: string, capability: Capability): Effect | null {
+  const r = selectAgentPolicy.get(agentId, capability) as { effect: string } | undefined;
+  return r && isEffect(r.effect) ? r.effect : null;
+}
+
+/** All overrides set on one agent, as a capability->effect map. */
+export function getAgentPolicies(agentId: string): Partial<Record<Capability, Effect>> {
+  const rows = selectAgentPoliciesFor.all(agentId) as { capability: string; effect: string }[];
+  const out: Partial<Record<Capability, Effect>> = {};
+  for (const r of rows) {
+    if (isCapability(r.capability) && isEffect(r.effect)) out[r.capability] = r.effect;
+  }
+  return out;
+}
+
+/**
+ * Set or clear one agent's capability override. `effect === null` clears it
+ * (falling back to the tier preset / global default). Emits a session event so
+ * connected clients refresh the agent's permission view.
+ */
+export function setAgentPolicy(
+  agentId: string,
+  capability: Capability,
+  effect: Effect | null,
+): Session | undefined {
+  const s = getSession(agentId);
+  if (!s) return undefined;
+  if (effect === null) deleteAgentPolicy.run(agentId, capability);
+  else upsertAgentPolicy.run({ agentId, capability, effect });
+  bus.emit('session', s);
+  return s;
+}
+
+// ---------- admission (register_agent gate) ----------
+const updateAdmitted = db.prepare(
+  `UPDATE sessions SET admittedAt = @admittedAt, updatedAt = @updatedAt WHERE id = @id`,
+);
+const insertAdmission = db.prepare(
+  `INSERT INTO admission_requests (id, agentId, askId, status, createdAt, decidedAt)
+   VALUES (@id, @agentId, @askId, @status, @createdAt, @decidedAt)`,
+);
+const selectAdmissionByAsk = db.prepare(
+  `SELECT * FROM admission_requests WHERE askId = ?`,
+);
+const selectPendingAdmissionForAgent = db.prepare(
+  `SELECT * FROM admission_requests WHERE agentId = ? AND status = 'pending' LIMIT 1`,
+);
+const updateAdmissionDecision = db.prepare(
+  `UPDATE admission_requests SET status = @status, decidedAt = @decidedAt WHERE id = @id`,
+);
+const deleteAdmissionsFor = db.prepare(`DELETE FROM admission_requests WHERE agentId = ?`);
+
+interface AdmissionRow {
+  id: string;
+  agentId: string;
+  askId: string;
+  status: 'pending' | 'approved' | 'denied';
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+const ADMIT_APPROVE = 'approve';
+const ADMIT_DENY = 'deny';
+
+/** Mark an agent admitted (a live contact). No-op if already admitted. */
+export function admitSession(id: string): Session | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  if (s.admittedAt == null) {
+    const ts = now();
+    updateAdmitted.run({ id, admittedAt: ts, updatedAt: ts });
+  }
+  const pend = selectPendingAdmissionForAgent.get(id) as AdmissionRow | undefined;
+  if (pend) updateAdmissionDecision.run({ id: pend.id, status: 'approved', decidedAt: now() });
+  const updated = getSession(id)!;
+  bus.emit('session', updated);
+  return updated;
+}
+
+/** Sessions awaiting the owner's admission decision (quarantined). */
+export function listPendingAdmissions(): Session[] {
+  return listSessions().filter((s) => s.admittedAt == null);
+}
+
+/** True once the owner has admitted this agent as a live contact. */
+export function isAdmitted(id: string): boolean {
+  const s = getSession(id);
+  return !!s && s.admittedAt != null;
+}
+
+/**
+ * Raise an owner-facing admission approval for a freshly-registered agent. The
+ * ask lands on the agent's own thread (options approve/deny) with a meta card so
+ * the UI renders a localized "admit this agent?" prompt. Idempotent per agent.
+ */
+export function createAdmissionRequest(agentId: string): void {
+  const agent = getSession(agentId);
+  if (!agent) return;
+  if (selectPendingAdmissionForAgent.get(agentId)) return; // already pending
+  const askId = randomUUID();
+  const ask: Ask = {
+    id: askId,
+    sessionId: agentId,
+    question: agent.title ?? agent.task ?? agentId,
+    options: [ADMIT_APPROVE, ADMIT_DENY],
+    status: 'pending',
+    answer: null,
+    createdAt: now(),
+    answeredAt: null,
+  };
+  insertAsk.run({ ...ask, options: JSON.stringify(ask.options) });
+  addMessage({
+    sessionId: agentId,
+    direction: 'agent',
+    kind: 'ask',
+    text: ask.question,
+    askId,
+    meta: { options: ask.options, admissionRequest: { agentId } },
+  });
+  insertAdmission.run({
+    id: randomUUID(),
+    agentId,
+    askId,
+    status: 'pending',
+    createdAt: now(),
+    decidedAt: null,
+  });
+}
+
+// Called from reply() when the owner answers an admission ask: approve -> admit;
+// deny -> remove the quarantined agent entirely.
+function settleAdmissionForAsk(askId: string, answerText: string): void {
+  const req = selectAdmissionByAsk.get(askId) as AdmissionRow | undefined;
+  if (!req || req.status !== 'pending') return;
+  if (answerText.trim() === ADMIT_APPROVE) {
+    admitSession(req.agentId);
+  } else {
+    updateAdmissionDecision.run({ id: req.id, status: 'denied', decidedAt: now() });
+    deleteSession(req.agentId);
+  }
+}
+
+// ---------- spawn requests (spawn_agent gate, owner-approved) ----------
+// An agent asking to launch a new agent when spawn_agent resolves to 'ask'. The
+// approval surfaces as an owner ask; the LAUNCH side effect lives in the server
+// (it owns the PTY), so core only tracks the request and its decision. The
+// server performs the spawn when the owner approves.
+export interface SpawnParams {
+  workPath: string;
+  runtime: string;
+  name?: string | null;
+  task?: string | null;
+}
+interface SpawnRow {
+  id: string;
+  spawnerId: string;
+  askId: string;
+  params: string;
+  status: 'pending' | 'approved' | 'denied';
+  createdAt: number;
+  decidedAt: number | null;
+}
+const insertSpawn = db.prepare(
+  `INSERT INTO spawn_requests (id, spawnerId, askId, params, status, createdAt, decidedAt)
+   VALUES (@id, @spawnerId, @askId, @params, @status, @createdAt, @decidedAt)`,
+);
+const selectSpawnByAsk = db.prepare(`SELECT * FROM spawn_requests WHERE askId = ?`);
+const selectPendingSpawns = db.prepare(
+  `SELECT * FROM spawn_requests WHERE status = 'pending' ORDER BY createdAt DESC`,
+);
+const updateSpawnDecision = db.prepare(
+  `UPDATE spawn_requests SET status = @status, decidedAt = @decidedAt WHERE id = @id`,
+);
+
+const SPAWN_APPROVE = 'approve';
+
+export interface SpawnRequest {
+  id: string;
+  spawnerId: string;
+  askId: string;
+  params: SpawnParams;
+  status: 'pending' | 'approved' | 'denied';
+  createdAt: number;
+  decidedAt: number | null;
+}
+
+function mapSpawn(r: SpawnRow): SpawnRequest {
+  return { ...r, params: JSON.parse(r.params) as SpawnParams };
+}
+
+/**
+ * Record an agent's request to spawn a new agent and raise the owner approval.
+ * The ask lands on the spawner's own thread (options approve/deny) with a meta
+ * card carrying the requested params. Returns the askId to long-poll/observe.
+ */
+export function createSpawnRequest(spawnerId: string, params: SpawnParams): string {
+  const askId = randomUUID();
+  const ask: Ask = {
+    id: askId,
+    sessionId: spawnerId,
+    question: params.name?.trim() || params.task?.trim() || params.workPath,
+    options: [SPAWN_APPROVE, ADMIT_DENY],
+    status: 'pending',
+    answer: null,
+    createdAt: now(),
+    answeredAt: null,
+  };
+  insertAsk.run({ ...ask, options: JSON.stringify(ask.options) });
+  addMessage({
+    sessionId: spawnerId,
+    direction: 'agent',
+    kind: 'ask',
+    text: ask.question,
+    askId,
+    meta: { options: ask.options, spawnRequest: { spawnerId, ...params } },
+  });
+  insertSpawn.run({
+    id: randomUUID(),
+    spawnerId,
+    askId,
+    params: JSON.stringify(params),
+    status: 'pending',
+    createdAt: now(),
+    decidedAt: null,
+  });
+  return askId;
+}
+
+export function getSpawnRequestByAsk(askId: string): SpawnRequest | undefined {
+  const r = selectSpawnByAsk.get(askId) as SpawnRow | undefined;
+  return r ? mapSpawn(r) : undefined;
+}
+
+export function listPendingSpawnRequests(): SpawnRequest[] {
+  return (selectPendingSpawns.all() as SpawnRow[]).map(mapSpawn);
+}
+
+/** Mark a spawn request approved/denied. The server calls this after launching. */
+export function decideSpawnRequest(askId: string, approve: boolean): void {
+  const r = selectSpawnByAsk.get(askId) as SpawnRow | undefined;
+  if (!r || r.status !== 'pending') return;
+  updateSpawnDecision.run({
+    id: r.id,
+    status: approve ? 'approved' : 'denied',
+    decidedAt: now(),
+  });
+}
+
+// ---------- capability resolution ----------
+/**
+ * The owner-controlled answer to "may this agent do X?". Pure, no side effects.
+ * Returns allow / ask / deny. Layered most-specific-first:
+ *   0. acting agent not admitted (and not asking to register) -> deny.
+ *   1. contact_agent: per-pair grant, then the visible-scope rule (see below).
+ *   2. per-agent override.
+ *   3. trust-tier preset.
+ *   4. owner global default.
+ * For contact_agent, an in-scope target uses the tier/global effect, while an
+ * out-of-scope target is denied unless an explicit allow-grant opens that edge.
+ */
+export function resolveCapability(
+  agentId: string,
+  capability: Capability,
+  targetId?: string | null,
+): Effect {
+  const agent = getSession(agentId);
+  if (!agent) return 'deny';
+  // A quarantined agent can do nothing until admitted.
+  if (agent.admittedAt == null) return 'deny';
+
+  const tier = agent.trustTier ?? 'standard';
+  const override = getAgentPolicy(agentId, capability);
+  const globalDefault = getSettings().permissions[capability] ?? 'ask';
+
+  if (capability === 'contact_agent') {
+    if (getSettings().agentComm === 'off') return 'deny'; // master kill switch
+    if (targetId) {
+      const grant = getGrantForPair(agentId, targetId); // most specific edge
+      if (grant) return grant.effect; // allow | deny
+      const to = getSession(targetId);
+      if (!to || to.admittedAt == null) return 'deny';
+      // Out-of-scope targets need an explicit grant (handled above); deny here.
+      if (!override && !isVisibleScope(agent.workPath, to.workPath)) {
+        return tier === 'autonomous' ? 'allow' : 'deny';
+      }
+    }
+  }
+
+  return resolveEffect({ capability, tier, agentOverride: override, globalDefault });
+}
+
 // Normalize a work path for scope comparison: unify slashes, drop trailing
 // slash, lowercase (paths are case-insensitive on Windows; harmless elsewhere).
 function normWorkPath(p: string): string {
@@ -1054,39 +1430,24 @@ export function visibleAgentsFor(sessionId: string): Session[] {
     (s) =>
       s.id !== sessionId &&
       s.archivedAt == null &&
+      s.admittedAt != null && // quarantined agents are invisible to peers
       (isVisibleScope(self.workPath, s.workPath) || granted.has(s.id)),
   );
 }
 
 /**
- * Decide whether `fromId` may initiate peer messaging to `toId`. Most-specific
- * wins, pure (no side effects). Three outcomes:
+ * Decide whether `fromId` may initiate peer messaging to `toId`. Thin adapter
+ * over resolveCapability('contact_agent'): the contact subsystem speaks
+ * 'approval' where the generic resolver says 'ask'. Outcomes:
  *   - 'allow'    : deliver directly.
  *   - 'deny'     : refuse.
- *   - 'approval' : not yet authorized, but eligible — the caller should raise a
+ *   - 'approval' : eligible but not yet authorized — the caller should raise a
  *                  guardian approval (agent-initiated contact request).
- * Order:
- *   1. global master switch off            -> deny.
- *   2. an exact-pair grant                 -> its effect (allow/deny).
- *   3. sender tier autonomous              -> allow; restricted -> deny.
- *   4. standard|trusted need the target in the sender's visible scope
- *      (reach outside it only via an explicit allow grant, handled at step 2);
- *      not visible -> deny.
- *   5. visible: trusted -> allow; standard -> approval.
  */
 export function resolvePeerPermission(
   fromId: string,
   toId: string,
 ): 'allow' | 'deny' | 'approval' {
-  if (getSettings().agentComm === 'off') return 'deny';
-  const grant = getGrantForPair(fromId, toId);
-  if (grant) return grant.effect;
-  const from = getSession(fromId);
-  const to = getSession(toId);
-  if (!from || !to) return 'deny';
-  const tier = from.trustTier ?? 'standard';
-  if (tier === 'autonomous') return 'allow';
-  if (tier === 'restricted') return 'deny';
-  if (!isVisibleScope(from.workPath, to.workPath)) return 'deny';
-  return tier === 'trusted' ? 'allow' : 'approval';
+  const effect = resolveCapability(fromId, 'contact_agent', toId);
+  return effect === 'ask' ? 'approval' : effect;
 }

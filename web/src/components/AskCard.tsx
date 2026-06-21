@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, HelpCircle, Users, X } from "lucide-react";
+import { Check, HelpCircle, Rocket, UserPlus, Users, X } from "lucide-react";
 import type { Message } from "../types";
 import { useStore } from "../lib/store";
 import { classNames, pathBase, sessionName } from "../lib/format";
@@ -18,23 +18,42 @@ export function AskCard({ ask, answered, answerText }: Props) {
   const [dismissed, setDismissed] = useState(false);
   const options = ask.meta?.options ?? [];
 
-  // A contact request renders a localized approval card; the option tokens stay
-  // 'approve' / 'deny' (what the backend matches) but the buttons are localized.
+  // A contact / admission / spawn request renders a localized approval card; the
+  // option tokens stay 'approve' / 'deny' (what the backend matches) but the
+  // buttons and copy are localized.
   const cr = ask.meta?.contactRequest;
+  const adm = ask.meta?.admissionRequest;
+  const sp = ask.meta?.spawnRequest;
+  const approval = cr || adm || sp;
   const nameOf = (id: string) => {
     const s = sessions.find((x) => x.id === id);
     return s ? sessionName(s, pathBase(s.workPath) || s.runtime) : id.slice(0, 8);
   };
   const optionLabel = (opt: string) =>
-    cr ? (opt === "approve" ? t("contactReq.approve") : t("contactReq.deny")) : opt;
+    approval ? (opt === "approve" ? t("contactReq.approve") : t("contactReq.deny")) : opt;
   const headerTag = answered
     ? t("ask.resolved")
     : cr
       ? t("contactReq.tag")
-      : t("ask.needs");
+      : adm
+        ? t("admitReq.tag")
+        : sp
+          ? t("spawnReq.tag")
+          : t("ask.needs");
   const bodyText = cr
     ? t("contactReq.body", { from: nameOf(cr.fromId), to: nameOf(cr.toId) })
-    : ask.text;
+    : adm
+      ? t("admitReq.body", { agent: nameOf(adm.agentId) })
+      : sp
+        ? t("spawnReq.body", { from: nameOf(sp.spawnerId), path: sp.workPath })
+        : ask.text;
+  const approvalIcon = adm ? (
+    <UserPlus size={16} />
+  ) : sp ? (
+    <Rocket size={16} />
+  ) : (
+    <Users size={16} />
+  );
 
   if (dismissed) return null;
 
@@ -71,7 +90,7 @@ export function AskCard({ ask, answered, answerText }: Props) {
             }`,
           }}
         >
-          {answered ? <Check size={16} /> : cr ? <Users size={16} /> : <HelpCircle size={16} />}
+          {answered ? <Check size={16} /> : approval ? approvalIcon : <HelpCircle size={16} />}
         </div>
 
         <div className="min-w-0 flex-1">

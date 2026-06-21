@@ -15,6 +15,13 @@ import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
 import { SESSION_STATUSES, TRUST_TIERS } from '../core/types';
+import {
+  CAPABILITIES,
+  EFFECTS,
+  TIER_PRESETS,
+  isCapability,
+  isEffect,
+} from '../core/permissions';
 import { mountMcpHttp } from './mcp-http';
 import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty } from './pty';
 import { startAgent, isOnline } from './wake';
@@ -108,7 +115,9 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
     name: name != null ? String(name) : null,
     description: description != null ? String(description) : null,
   });
-  ok(res, { session, agentId: session.id });
+  // `pending` tells the agent the owner hasn't admitted it yet (quarantined):
+  // it can hold its card but peers can't see or contact it until approved.
+  ok(res, { session, agentId: session.id, pending: session.admittedAt == null });
 });
 
 app.post('/api/sessions/:id/notify', (req: Request, res: Response) => {
@@ -346,6 +355,34 @@ app.post('/api/sessions/import', (req: Request, res: Response) => {
 // Create a brand-new agent and launch it in the chosen folder, wired to Beacon
 // (BEACON_SESSION_ID is injected by the PTY so the agent attaches to THIS
 // contact). body { workPath, runtime, name?, task? }
+// Create a contact and launch a fresh agent process in its folder, wired to
+// Beacon. Shared by the human "launch" action and the agent-initiated "spawn"
+// capability. `origin` records who created it; the contact is admitted at
+// creation because the launch is already owner-authorized (directly, or via the
+// spawn_agent policy / approval).
+function spawnAgent(params: {
+  workPath: string;
+  runtime: string;
+  name?: string | null;
+  task?: string | null;
+  origin: 'agent' | 'human';
+}) {
+  const session = store.createSession({
+    runtime: params.runtime || 'claude-code',
+    workPath: params.workPath,
+    task: params.task ?? '',
+    name: params.name ?? null,
+    origin: params.origin,
+  });
+  // The agent's first registration (any transport) attaches to THIS contact
+  // instead of opening a duplicate.
+  store.markPendingLaunch(session.id);
+  // Start a fresh agent process (not a resume) in the folder.
+  markFreshLaunch(session.id);
+  const launched = ensurePty(session.id);
+  return { session, launched };
+}
+
 app.post('/api/sessions/launch', (req: Request, res: Response) => {
   const body = req.body ?? {};
   const workPath = String(body.workPath ?? '');
@@ -353,13 +390,7 @@ app.post('/api/sessions/launch', (req: Request, res: Response) => {
   const name = body.name != null ? String(body.name) : null;
   const task = body.task != null ? String(body.task) : '';
   if (!workPath.trim()) { res.status(400).json({ error: 'workPath is required' }); return; }
-  const session = store.createSession({ runtime, workPath, task, name, origin: 'human' });
-  // Let the agent's first registration (any transport) attach to THIS contact
-  // instead of opening a duplicate.
-  store.markPendingLaunch(session.id);
-  // Start a fresh agent process (not a resume) in the folder.
-  markFreshLaunch(session.id);
-  const launched = ensurePty(session.id);
+  const { session, launched } = spawnAgent({ workPath, runtime, name, task, origin: 'human' });
   ok(res, { session, launched });
 });
 
@@ -409,6 +440,116 @@ app.delete('/api/grants/:id', (req: Request, res: Response) => {
   ok(res, { ok: true });
 });
 
+// --- owner permission model (capabilities) ---
+// Everything the UI needs to render the permission panel and tier legend: the
+// capability set, the three effects, what each trust tier grants (the legend
+// that makes tiers legible), the owner global defaults and the master switch.
+app.get('/api/permissions', (_req: Request, res: Response) => {
+  ok(res, {
+    capabilities: CAPABILITIES,
+    effects: EFFECTS,
+    tierPresets: TIER_PRESETS,
+    globalDefaults: getSettings().permissions,
+    agentComm: getSettings().agentComm,
+  });
+});
+
+// Per-agent capability override (beats the tier preset / global default). body
+// { capability, effect } where effect is allow|ask|deny, or null to clear it.
+app.put('/api/sessions/:id/policy', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const body = req.body ?? {};
+  const capability = String(body.capability ?? '');
+  if (!isCapability(capability)) {
+    res.status(400).json({ error: `invalid capability; must be one of: ${CAPABILITIES.join(', ')}` }); return;
+  }
+  const raw = body.effect;
+  if (raw !== null && !(typeof raw === 'string' && isEffect(raw))) {
+    res.status(400).json({ error: 'invalid effect; must be allow, ask, deny or null' }); return;
+  }
+  const session = store.setAgentPolicy(id, capability, raw === null ? null : (raw as 'allow' | 'ask' | 'deny'));
+  ok(res, { session, policies: store.getAgentPolicies(id) });
+});
+
+app.get('/api/sessions/:id/policy', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  ok(res, { policies: store.getAgentPolicies(id) });
+});
+
+// --- admission (register_agent gate) ---
+// Agents quarantined pending the owner's decision (admittedAt == null).
+app.get('/api/admissions', (_req: Request, res: Response) => {
+  ok(res, { pending: store.listPendingAdmissions() });
+});
+
+// Owner admits or rejects a quarantined agent. body { approve: boolean }.
+// approve -> the agent goes live; reject -> it is deleted.
+app.post('/api/sessions/:id/admit', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const approve = req.body?.approve !== false; // default approve
+  if (approve) {
+    const session = store.admitSession(id);
+    ok(res, { session, admitted: true });
+  } else {
+    killPty(id);
+    const removed = store.deleteSession(id);
+    ok(res, { ok: removed, admitted: false });
+  }
+});
+
+// --- spawn requests (spawn_agent gate) ---
+app.get('/api/spawn-requests', (_req: Request, res: Response) => {
+  ok(res, { pending: store.listPendingSpawnRequests() });
+});
+
+// Agent-initiated spawn of a new agent. :id is the spawner. Gated by the
+// spawn_agent capability: allow -> launch now; deny -> 403; ask -> raise an owner
+// approval and return pending (the spawn runs when the owner approves, via the
+// reply path or POST .../spawn-approve). body { workPath, runtime?, name?, task? }.
+app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const body = req.body ?? {};
+  const workPath = String(body.workPath ?? '');
+  if (!workPath.trim()) { res.status(400).json({ error: 'workPath is required' }); return; }
+  const params = {
+    workPath,
+    runtime: String(body.runtime ?? 'claude-code'),
+    name: body.name != null ? String(body.name) : null,
+    task: body.task != null ? String(body.task) : null,
+  };
+  store.touchSeen(id);
+  const verdict = store.resolveCapability(id, 'spawn_agent');
+  if (verdict === 'deny') {
+    res.status(403).json({ error: 'not authorized to spawn agents' }); return;
+  }
+  if (verdict === 'ask') {
+    const askId = store.createSpawnRequest(id, params);
+    ok(res, { status: 'pending', askId }); return;
+  }
+  const { session, launched } = spawnAgent({ ...params, origin: 'agent' });
+  ok(res, { status: 'spawned', session, launched });
+});
+
+// Owner approves/denies a pending spawn request from the tray. body { approve }.
+app.post('/api/spawn-requests/:askId/decide', (req: Request, res: Response) => {
+  const askId = param(req, 'askId');
+  const sr = store.getSpawnRequestByAsk(askId);
+  if (!sr || sr.status !== 'pending') { res.status(404).json({ error: 'no pending spawn request' }); return; }
+  const approve = req.body?.approve !== false;
+  let spawned: unknown = null;
+  if (approve) spawned = spawnAgent({ ...sr.params, origin: 'agent' }).session;
+  store.decideSpawnRequest(askId, approve);
+  // Resolve the backing ask so the spawner unblocks / the card stops being pending.
+  const ask = store.getAsk(askId);
+  if (ask && ask.status === 'pending') store.reply(sr.spawnerId, approve ? 'approve' : 'deny', askId);
+  ok(res, { approve, spawned });
+});
+
 app.get('/api/sessions/:id', (req: Request, res: Response) => {
   const session = store.getSession(param(req,'id'));
   if (!session) return notFound(res);
@@ -434,6 +575,16 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   }
   const text = String(req.body?.text ?? '');
   const message = store.reply(param(req,'id'), text, rawAskId);
+  // If this answer settles a pending spawn request (the owner approving inline
+  // from the chat card), perform the launch here — core can't touch the PTY.
+  if (rawAskId) {
+    const sr = store.getSpawnRequestByAsk(rawAskId);
+    if (sr && sr.status === 'pending') {
+      const approve = text.trim() === 'approve';
+      if (approve) spawnAgent({ ...sr.params, origin: 'agent' });
+      store.decideSpawnRequest(rawAskId, approve);
+    }
+  }
   // Deliver the message to the agent. The terminal IS the agent: if one is
   // running we type into it; if not, we spawn it on demand. Either way the
   // message reaches a real agent — no "offline"/"queued" dead-ends. The only
@@ -490,10 +641,28 @@ app.put('/api/settings', (req: Request, res: Response) => {
   if (typeof body.agentComm === 'string' && !(VALID_AGENT_COMM as readonly string[]).includes(body.agentComm)) {
     res.status(400).json({ error: `invalid agentComm; must be one of: ${VALID_AGENT_COMM.join(', ')}` }); return;
   }
+  // Owner global capability defaults (allow/ask/deny per capability). Merge over
+  // the current map so a partial patch only changes the keys it names.
+  let permissions: Record<string, string> | undefined;
+  if (body.permissions != null && typeof body.permissions === 'object') {
+    const incoming = body.permissions as Record<string, unknown>;
+    const merged: Record<string, string> = { ...getSettings().permissions };
+    for (const cap of CAPABILITIES) {
+      const v = incoming[cap];
+      if (v != null) {
+        if (typeof v !== 'string' || !isEffect(v)) {
+          res.status(400).json({ error: `invalid effect for ${cap}; must be allow, ask or deny` }); return;
+        }
+        merged[cap] = v;
+      }
+    }
+    permissions = merged;
+  }
   const patch: Record<string, unknown> = {};
   if (typeof body.autoStart === 'string') patch.autoStart = body.autoStart;
   if (typeof body.startPermission === 'string') patch.startPermission = body.startPermission;
   if (typeof body.agentComm === 'string') patch.agentComm = body.agentComm;
+  if (permissions) patch.permissions = permissions;
   ok(res, { settings: setSettings(patch) });
 });
 
@@ -637,7 +806,10 @@ app.get('/api/connect-info', (req: Request, res: Response) => {
 // Hosted MCP endpoint (Streamable HTTP at /mcp) — registered before the static
 // SPA fallback so it isn't swallowed by it.
 // ----------------------------------------------------------------------------
-mountMcpHttp(app, { token: PLATFORM_TOKEN });
+mountMcpHttp(app, {
+  token: PLATFORM_TOKEN,
+  spawn: (params) => spawnAgent({ ...params, origin: 'agent' }),
+});
 
 // ----------------------------------------------------------------------------
 // Static frontend (production build) with SPA fallback

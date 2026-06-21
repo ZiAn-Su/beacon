@@ -181,8 +181,27 @@ try {
     const askId = args[0] ?? '';
     await api(`/api/sessions/${id}/peer-reply`, { askId, text: args.slice(1).join(' ') });
     console.log('answered');
+  } else if (cmd === 'spawn') {
+    const id = await ensureSession();
+    const workPath = args[0] ?? '';
+    const task = args.slice(1).join(' ');
+    const r = await api(`/api/sessions/${id}/spawn`, { workPath, task: task || undefined });
+    if (r.status === 'spawned') {
+      console.log(`spawned agent ${r.session?.id ?? ''}`);
+    } else {
+      // pending — guardian must approve. Block on the backing ask.
+      process.stderr.write('waiting for the human to approve the new agent…\n');
+      for (;;) {
+        const { ask } = await api(`/api/asks/${r.askId}/wait?timeoutMs=25000`);
+        if (ask.status === 'answered') {
+          console.log(ask.answer?.trim() === 'approve' ? 'approved — the new agent is launching' : 'denied by the human');
+          break;
+        }
+        if (ask.status === 'cancelled') { console.log('(the human dismissed the spawn request)'); break; }
+      }
+    }
   } else {
-    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...>>');
+    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...]>');
     process.exit(1);
   }
 } catch (e) {

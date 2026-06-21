@@ -58,6 +58,11 @@ export interface Session {
   origin: 'agent' | 'human'; // 'agent' self-registered | 'human' pre-created
   guardianId: string | null; // Owner.id this session is accountable to
   trustTier: TrustTier; // graduated trust; defaults to 'standard' at read time
+  // Admission: when the owner admitted this agent as a live contact. Null while
+  // pending the owner's decision (register_agent resolved to 'ask'); such a
+  // session is quarantined — invisible to peers and barred from acting — until
+  // approved. Human-created and auto-allowed sessions are admitted at creation.
+  admittedAt: number | null;
   createdAt: number;
   updatedAt: number;
 }

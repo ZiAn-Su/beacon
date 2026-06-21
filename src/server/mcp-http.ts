@@ -17,8 +17,17 @@ import * as store from '../core/store';
 import { registerBeaconTools, type AgentOps } from '../mcp/tools';
 import { resolveActiveSessionId } from './agent-sessions';
 
+// The launch side effect (PTY) lives in the gateway; the hosted MCP receives it
+// as a callback so spawn_agent can run in-process without reaching back over HTTP.
+type SpawnFn = (params: {
+  workPath: string;
+  runtime: string;
+  name?: string | null;
+  task?: string | null;
+}) => { session: { id: string } };
+
 // Direct, in-process ops backed by the core store (no HTTP round-trip).
-function storeOps(): AgentOps {
+function storeOps(spawnFn: SpawnFn): AgentOps {
   return {
     async register(input) {
       const runtime = input.runtime || 'claude-code';
@@ -113,10 +122,29 @@ function storeOps(): AgentOps {
       const cr = store.createContactRequest(fromId, targetId, reason ?? null);
       return { status: 'pending', askId: cr.askId };
     },
+    async spawn(spawnerId, params) {
+      const v = store.resolveCapability(spawnerId, 'spawn_agent');
+      if (v === 'deny') throw new Error('not authorized to spawn agents');
+      const p = {
+        workPath: params.workPath,
+        runtime: params.runtime ?? 'claude-code',
+        name: params.name ?? null,
+        task: params.task ?? null,
+      };
+      if (v === 'ask') {
+        const askId = store.createSpawnRequest(spawnerId, p);
+        return { status: 'pending', askId };
+      }
+      const { session } = spawnFn(p);
+      return { status: 'spawned', agentId: session.id };
+    },
   };
 }
 
-export function mountMcpHttp(app: Express, opts: { token: string }): void {
+export function mountMcpHttp(
+  app: Express,
+  opts: { token: string; spawn: SpawnFn },
+): void {
   // One transport per MCP session id (Streamable HTTP keeps the connection
   // stateful so a single agent's tool calls share one Beacon session).
   const transports: Record<string, StreamableHTTPServerTransport> = {};
@@ -156,7 +184,7 @@ export function mountMcpHttp(app: Express, opts: { token: string }): void {
         if (transport!.sessionId) delete transports[transport!.sessionId];
       };
       const server = new McpServer({ name: 'beacon', version: '0.4.0' });
-      registerBeaconTools(server, storeOps(), {
+      registerBeaconTools(server, storeOps(opts.spawn), {
         runtime: process.env.AGENT_RUNTIME ?? 'claude-code',
         workPath: '',
         task: '',
