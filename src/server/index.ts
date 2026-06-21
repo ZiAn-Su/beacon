@@ -737,6 +737,106 @@ app.post('/api/sessions/batch', (req: Request, res: Response) => {
   ok(res, { affected });
 });
 
+// ----------------------------------------------------------------------------
+// Channels (group messaging) — north (human) CRUD + messages
+// ----------------------------------------------------------------------------
+const channelNotFound = (res: Response) => res.status(404).json({ error: 'channel not found' });
+
+app.get('/api/channels', (_req: Request, res: Response) => {
+  const channels = store.listChannels().map((c) => ({
+    ...c,
+    participants: store.listParticipants(c.id),
+  }));
+  ok(res, { channels });
+});
+
+app.post('/api/channels', (req: Request, res: Response) => {
+  const name = String(req.body?.name ?? '').trim();
+  if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+  const channel = store.createChannel(name);
+  const ids = Array.isArray(req.body?.participants) ? req.body.participants.map(String) : [];
+  for (const id of ids) if (store.getSession(id)) store.addParticipant(channel.id, id);
+  ok(res, { channel, participants: store.listParticipants(channel.id) });
+});
+
+app.get('/api/channels/:id', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  const channel = store.getChannel(id);
+  if (!channel) return channelNotFound(res);
+  ok(res, { channel, participants: store.listParticipants(id), messages: store.channelMessages(id) });
+});
+
+app.patch('/api/channels/:id', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  if (typeof req.body?.name === 'string') {
+    ok(res, { channel: store.renameChannel(id, String(req.body.name)) }); return;
+  }
+  res.status(400).json({ error: 'no patchable fields; expected name' });
+});
+
+app.delete('/api/channels/:id', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  ok(res, { ok: store.deleteChannel(id) });
+});
+
+app.post('/api/channels/:id/participants', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  const sessionId = String(req.body?.sessionId ?? '');
+  if (!store.getSession(sessionId)) return notFound(res);
+  store.addParticipant(id, sessionId);
+  ok(res, { participants: store.listParticipants(id) });
+});
+
+app.delete('/api/channels/:id/participants/:sessionId', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  store.removeParticipant(id, param(req, 'sessionId'));
+  ok(res, { participants: store.listParticipants(id) });
+});
+
+app.get('/api/channels/:id/messages', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  ok(res, { messages: store.channelMessages(id) });
+});
+
+// Human (owner) posts to a channel. fromSessionId null = the human.
+app.post('/api/channels/:id/messages', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getChannel(id)) return channelNotFound(res);
+  const text = String(req.body?.text ?? '');
+  if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  ok(res, { message: store.postChannelMessage(id, null, text) });
+});
+
+// --- south (agent) channel access ---
+// An agent posts to a channel it belongs to. body { channelId, text }.
+app.post('/api/sessions/:id/channel-post', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const channelId = String(req.body?.channelId ?? '');
+  const text = String(req.body?.text ?? '');
+  if (!store.getChannel(channelId)) return channelNotFound(res);
+  if (!store.isParticipant(channelId, id)) {
+    res.status(403).json({ error: 'not a participant of this channel' }); return;
+  }
+  if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  store.touchSeen(id);
+  ok(res, { message: store.postChannelMessage(channelId, id, text) });
+});
+
+// Channels an agent belongs to (for its addressing/list view).
+app.get('/api/sessions/:id/channels', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  ok(res, { channels: store.channelsForSession(id) });
+});
+
 app.get('/api/health', (_req: Request, res: Response) =>
   res.json({ ok: true, version: VERSION, ts: Date.now() })
 );
@@ -873,6 +973,9 @@ function broadcast(payload: unknown) {
 bus.on('session', (session) => broadcast({ type: 'session', session }));
 bus.on('message', (message) => broadcast({ type: 'message', message }));
 bus.on('sessionRemoved', (id) => broadcast({ type: 'session-removed', id }));
+bus.on('channel', (channel) => broadcast({ type: 'channel', channel }));
+bus.on('channelRemoved', (id) => broadcast({ type: 'channel-removed', id }));
+bus.on('channelMessage', (message) => broadcast({ type: 'channel-message', message }));
 
 server.requestTimeout = 0; // allow long-poll /wait without being killed
 server.listen(PORT, () => {
