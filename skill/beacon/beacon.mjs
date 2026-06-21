@@ -61,6 +61,13 @@ const renderInboxLine = (m) => {
   return `- ${m.text}`;
 };
 
+// A channel message in the merged inbox: tagged with the channel and who posted
+// (a peer agent, or the human guardian).
+const renderChannelLine = (m) => {
+  const who = m.fromSessionId ? `agent ${m.fromSessionId}` : 'guardian';
+  return `[#${m.channelName} · ${who}] ${m.text}`;
+};
+
 async function api(path, body) {
   const res = await fetch(BASE + path, {
     method: body === undefined ? 'GET' : 'POST',
@@ -135,13 +142,33 @@ try {
   } else if (cmd === 'inbox') {
     const c = loadCache();
     const id = c.sessionId || (await ensureSession());
-    const { messages } = await api(`/api/sessions/${id}/inbox?after=${c.lastInboxTs ?? 0}`);
-    if (messages.length) {
+    const after = c.lastInboxTs ?? 0;
+    // One cursor covers 1:1 chat and group channels (same clock). Merge by time.
+    const [{ messages }, { messages: chan }] = await Promise.all([
+      api(`/api/sessions/${id}/inbox?after=${after}`),
+      api(`/api/sessions/${id}/channel-inbox?after=${after}`),
+    ]);
+    const items = [
+      ...messages.map((m) => ({ createdAt: m.createdAt, line: renderInboxLine(m) })),
+      ...chan.map((m) => ({ createdAt: m.createdAt, line: renderChannelLine(m) })),
+    ].sort((a, b) => a.createdAt - b.createdAt);
+    if (items.length) {
       c.sessionId = id;
-      c.lastInboxTs = messages[messages.length - 1].createdAt;
+      c.lastInboxTs = items[items.length - 1].createdAt;
       saveCache(c);
     }
-    console.log(messages.length ? messages.map(renderInboxLine).join('\n') : '(no new messages from the human)');
+    console.log(items.length ? items.map((i) => i.line).join('\n') : '(no new messages from the human)');
+  } else if (cmd === 'channels') {
+    const id = await ensureSession();
+    const { channels } = await api(`/api/sessions/${id}/channels`);
+    console.log(channels.length
+      ? channels.map((c) => `${c.id} — ${c.name}`).join('\n')
+      : '(you are not in any channels yet)');
+  } else if (cmd === 'channel-post') {
+    const id = await ensureSession();
+    const channelId = args[0] ?? '';
+    await api(`/api/sessions/${id}/channel-post`, { channelId, text: args.slice(1).join(' ') });
+    console.log('posted to channel');
   } else if (cmd === 'agents') {
     const id = await ensureSession();
     const { agents } = await api(`/api/agents?visibleTo=${encodeURIComponent(id)}`);
@@ -201,7 +228,7 @@ try {
       }
     }
   } else {
-    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...]>');
+    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...] | channels | channel-post <channelId> <msg...>>');
     process.exit(1);
   }
 } catch (e) {

@@ -138,6 +138,20 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       const { session } = spawnFn(p);
       return { status: 'spawned', agentId: session.id };
     },
+    async listChannels(forId) {
+      return store.channelsForSession(forId).map((c) => ({ id: c.id, name: c.name }));
+    },
+    async postChannel(fromId, channelId, text) {
+      // Same membership guard the REST south route enforces.
+      if (!store.getChannel(channelId)) throw new Error('channel not found');
+      if (!store.isParticipant(channelId, fromId)) {
+        throw new Error('not a participant of this channel');
+      }
+      store.postChannelMessage(channelId, fromId, text);
+    },
+    async channelInbox(id, after) {
+      return store.channelInbox(id, after);
+    },
   };
 }
 

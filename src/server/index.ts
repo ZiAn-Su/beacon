@@ -837,6 +837,16 @@ app.get('/api/sessions/:id/channels', (req: Request, res: Response) => {
   ok(res, { channels: store.channelsForSession(id) });
 });
 
+// Channel messages addressed to an agent since `after` (excludes its own posts).
+// Lets a remote agent (stdio MCP / beacon.mjs) poll group traffic via check_inbox.
+app.get('/api/sessions/:id/channel-inbox', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const after = Number(req.query.after ?? 0) || 0;
+  ok(res, { messages: store.channelInbox(id, after) });
+});
+
 app.get('/api/health', (_req: Request, res: Response) =>
   res.json({ ok: true, version: VERSION, ts: Date.now() })
 );

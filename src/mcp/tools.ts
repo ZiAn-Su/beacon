@@ -59,6 +59,22 @@ export interface AgentOps {
     spawnerId: string,
     params: { workPath: string; runtime?: string; name?: string | null; task?: string | null },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
+  // Group channels: a channel fans a message out to all its members (other
+  // agents + the human guardian). v1 is broadcast chat.
+  listChannels(forId: string): Promise<{ id: string; name: string }[]>;
+  postChannel(fromId: string, channelId: string, text: string): Promise<void>;
+  channelInbox(
+    id: string,
+    after: number,
+  ): Promise<
+    {
+      channelId: string;
+      channelName: string;
+      fromSessionId: string | null;
+      text: string;
+      createdAt: number;
+    }[]
+  >;
 }
 
 export interface AgentDefaults {
@@ -267,10 +283,20 @@ export function registerBeaconTools(
     },
     async () => {
       const id = await ensure();
-      const messages = await ops.inbox(id, lastInboxTs);
-      if (messages.length) lastInboxTs = messages[messages.length - 1].createdAt;
-      const text = messages.length
-        ? messages.map(renderInboxLine).join('\n')
+      // One cursor covers both 1:1 chat and group channels (both stamped from
+      // the same clock). Merge by time so a polling agent sees them interleaved.
+      const [direct, channel] = await Promise.all([
+        ops.inbox(id, lastInboxTs),
+        ops.channelInbox(id, lastInboxTs),
+      ]);
+      const items: { createdAt: number; line: string }[] = [
+        ...direct.map((m) => ({ createdAt: m.createdAt, line: renderInboxLine(m) })),
+        ...channel.map((m) => ({ createdAt: m.createdAt, line: renderChannelLine(m) })),
+      ];
+      items.sort((a, b) => a.createdAt - b.createdAt);
+      if (items.length) lastInboxTs = items[items.length - 1].createdAt;
+      const text = items.length
+        ? items.map((i) => i.line).join('\n')
         : '(no new messages from the human)';
       return { content: [{ type: 'text', text }] };
     },
@@ -480,6 +506,53 @@ export function registerBeaconTools(
       }
     },
   );
+
+  server.registerTool(
+    'list_channels',
+    {
+      title: 'List group channels you belong to',
+      description:
+        'List the channels (group conversations) you are a member of. A channel fans every ' +
+        'message out to all its members — other agents and the human guardian. Use post_channel ' +
+        'to send; channel messages also arrive via check_inbox.',
+      inputSchema: {},
+    },
+    async () => {
+      const id = await ensure();
+      const channels = await ops.listChannels(id);
+      const text = channels.length
+        ? channels.map((c) => `${c.id} — ${c.name}`).join('\n')
+        : '(you are not in any channels yet)';
+      return { content: [{ type: 'text', text }] };
+    },
+  );
+
+  server.registerTool(
+    'post_channel',
+    {
+      title: 'Post a message to a group channel',
+      description:
+        'Broadcast a message to a channel (group) you belong to. Everyone in it — other agents ' +
+        'and the human guardian — sees it. Use channel_id from list_channels.',
+      inputSchema: {
+        channel_id: z.string().describe('Target channel id (from list_channels)'),
+        message: z.string().describe('The message to broadcast to the channel'),
+      },
+    },
+    async ({ channel_id, message }) => {
+      const id = await ensure();
+      try {
+        await ops.postChannel(id, channel_id, message);
+      } catch (e) {
+        return {
+          content: [
+            { type: 'text', text: `Could not post: ${e instanceof Error ? e.message : String(e)}` },
+          ],
+        };
+      }
+      return { content: [{ type: 'text', text: 'Posted to channel.' }] };
+    },
+  );
 }
 
 /**
@@ -521,6 +594,20 @@ function renderInboxLine(m: {
     return `[from agent ${m.fromSessionId}] ${m.text}`;
   }
   return `- ${m.text}`;
+}
+
+/**
+ * Render one channel message for check_inbox: tag it with the channel name and
+ * who posted (a peer agent, or the human guardian) so group traffic is distinct
+ * from 1:1 chat in the same inbox view.
+ */
+function renderChannelLine(m: {
+  channelName: string;
+  fromSessionId: string | null;
+  text: string;
+}): string {
+  const who = m.fromSessionId ? `agent ${m.fromSessionId}` : 'guardian';
+  return `[#${m.channelName} · ${who}] ${m.text}`;
 }
 
 /**
@@ -653,6 +740,30 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         },
       );
       return { status: r.status, askId: r.askId, agentId: r.session?.id };
+    },
+    async listChannels(forId) {
+      const { channels } = await api<{ channels: { id: string; name: string }[] }>(
+        `/api/sessions/${forId}/channels`,
+      );
+      return channels.map((c) => ({ id: c.id, name: c.name }));
+    },
+    async postChannel(fromId, channelId, text) {
+      await api(`/api/sessions/${fromId}/channel-post`, {
+        method: 'POST',
+        body: JSON.stringify({ channelId, text }),
+      });
+    },
+    async channelInbox(id, after) {
+      const { messages } = await api<{
+        messages: {
+          channelId: string;
+          channelName: string;
+          fromSessionId: string | null;
+          text: string;
+          createdAt: number;
+        }[];
+      }>(`/api/sessions/${id}/channel-inbox?after=${after}`);
+      return messages;
     },
   };
 }

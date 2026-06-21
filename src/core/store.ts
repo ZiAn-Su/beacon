@@ -616,6 +616,7 @@ export function deleteSession(id: string): boolean {
     deleteSessionContactRequests.run(id, id);
     deleteAgentPoliciesFor.run(id);
     deleteAdmissionsFor.run(id);
+    deleteParticipantsForSession.run(id);
     deleteSessionRow.run(id);
   });
   tx();
