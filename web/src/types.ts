@@ -63,8 +63,28 @@ export interface Message {
   deliveredAt: number | null;
 }
 
+// Group channels: a channel fans a message out to all members (agents + the
+// human owner). v1 is broadcast chat. Mirrors src/core/types.ts.
+export interface Channel {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
+export interface ChannelMessage {
+  id: string;
+  channelId: string;
+  // The posting agent's session id, or null for the human (owner).
+  fromSessionId: string | null;
+  text: string;
+  createdAt: number;
+}
+
 export type WsEvent =
   | { type: "hello"; sessions: Session[] }
   | { type: "session"; session: Session }
   | { type: "session-removed"; id: string }
-  | { type: "message"; message: Message };
+  | { type: "message"; message: Message }
+  | { type: "channel"; channel: Channel }
+  | { type: "channel-removed"; id: string }
+  | { type: "channel-message"; message: ChannelMessage };

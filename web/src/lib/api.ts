@@ -1,4 +1,4 @@
-import type { Message, Session } from "../types";
+import type { Channel, ChannelMessage, Message, Session } from "../types";
 
 // Typed wrappers for the north-side REST contract. In dev Vite proxies
 // `/api` -> http://127.0.0.1:4319, so we just use relative URLs.
@@ -359,4 +359,86 @@ export interface ConnectInfo {
 export async function getConnectInfo(): Promise<ConnectInfo> {
   const r = await fetch('/api/connect-info');
   return json<ConnectInfo>(r);
+}
+
+// ---- group channels (north / owner side) ----
+
+export async function listChannels(): Promise<Channel[]> {
+  const r = await fetch("/api/channels");
+  return (await json<{ channels: Channel[] }>(r)).channels;
+}
+
+export interface ChannelDetail {
+  channel: Channel;
+  participants: string[];
+  messages: ChannelMessage[];
+}
+
+export async function getChannel(id: string): Promise<ChannelDetail> {
+  const r = await fetch(`/api/channels/${encodeURIComponent(id)}`);
+  return json<ChannelDetail>(r);
+}
+
+export async function createChannel(
+  name: string,
+  participants: string[],
+): Promise<{ channel: Channel; participants: string[] }> {
+  const r = await fetch("/api/channels", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, participants }),
+  });
+  return json<{ channel: Channel; participants: string[] }>(r);
+}
+
+export async function renameChannel(id: string, name: string): Promise<Channel> {
+  const r = await fetch(`/api/channels/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return (await json<{ channel: Channel }>(r)).channel;
+}
+
+export async function deleteChannel(id: string): Promise<void> {
+  const r = await fetch(`/api/channels/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  await json<{ ok: boolean }>(r);
+}
+
+export async function addChannelParticipant(
+  channelId: string,
+  sessionId: string,
+): Promise<string[]> {
+  const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/participants`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  });
+  return (await json<{ participants: string[] }>(r)).participants;
+}
+
+export async function removeChannelParticipant(
+  channelId: string,
+  sessionId: string,
+): Promise<string[]> {
+  const r = await fetch(
+    `/api/channels/${encodeURIComponent(channelId)}/participants/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" },
+  );
+  return (await json<{ participants: string[] }>(r)).participants;
+}
+
+/** Owner posts to a channel (fromSessionId null). */
+export async function postChannelMessage(
+  channelId: string,
+  text: string,
+): Promise<ChannelMessage> {
+  const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  return (await json<{ message: ChannelMessage }>(r)).message;
 }

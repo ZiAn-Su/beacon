@@ -4,6 +4,7 @@ import { Rail } from "./components/Rail";
 import { Resizer } from "./components/Resizer";
 import { ContactList } from "./components/ContactList";
 import { ContactsView, ContactProfile } from "./components/ContactsView";
+import { ChannelsView } from "./components/ChannelsView";
 import { Conversation } from "./components/Conversation";
 import { EmptyState } from "./components/EmptyState";
 import { ConnectAgentModal } from "./components/ConnectAgentModal";
@@ -67,7 +68,7 @@ function Shell() {
   } = useStore();
   const { t } = useI18n();
   const [theme, setTheme] = useState<Theme>(() => readInitialTheme());
-  const [view, setView] = useState<"chats" | "contacts">("chats");
+  const [view, setView] = useState<"chats" | "channels" | "contacts">("chats");
   const [contactId, setContactId] = useState<string | null>(null);
   const [mobileView, setMobileView] = useState<"contacts" | "conversation">(
     "contacts",
@@ -354,6 +355,8 @@ function Shell() {
             </>
           )}
         </>
+      ) : view === "channels" ? (
+        <ChannelsView sessions={sessions} now={now} />
       ) : (
         <ContactsView
           sessions={sessions}

@@ -1,7 +1,7 @@
-import { BookUser, MessageSquare, Settings } from "lucide-react";
+import { BookUser, Hash, MessageSquare, Settings } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 
-type View = "chats" | "contacts";
+type View = "chats" | "channels" | "contacts";
 
 interface Props {
   onOpenSettings: () => void;
@@ -27,6 +27,13 @@ export function Rail({ onOpenSettings, view, onChangeView, unread = 0 }: Props) 
           badge={unread > 0}
         >
           <MessageSquare size={18} />
+        </NavButton>
+        <NavButton
+          active={view === "channels"}
+          onClick={() => onChangeView("channels")}
+          label={t("nav.channels")}
+        >
+          <Hash size={18} />
         </NavButton>
         <NavButton
           active={view === "contacts"}

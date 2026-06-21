@@ -8,16 +8,24 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Message, Session, WsEvent } from "../types";
+import type { Channel, ChannelMessage, Message, Session, WsEvent } from "../types";
 import {
+  addChannelParticipant,
   batchSessions as batchSessionsApi,
   cancelAsk,
+  createChannel as createChannelApi,
+  deleteChannel as deleteChannelApi,
   deleteSession as deleteSessionApi,
+  getChannel as getChannelApi,
   getConversation,
   getSettings,
+  listChannels,
   listSessions,
   patchSession,
+  postChannelMessage as postChannelMessageApi,
   putSettings,
+  removeChannelParticipant,
+  renameChannel as renameChannelApi,
   reply,
   startAgent as startAgentApi,
   type AgentDelivery,
@@ -61,6 +69,17 @@ interface StoreState {
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   /** Force-reset unread for a session (e.g. on focus). */
   markSessionRead: (sessionId: string) => void;
+  // ---- group channels ----
+  channels: Channel[];
+  channelMessages: Record<string, ChannelMessage[]>;
+  channelParticipants: Record<string, string[]>;
+  ensureChannelDetail: (channelId: string) => Promise<void>;
+  createChannel: (name: string, participants: string[]) => Promise<Channel>;
+  renameChannel: (channelId: string, name: string) => Promise<void>;
+  deleteChannel: (channelId: string) => Promise<void>;
+  addChannelMember: (channelId: string, sessionId: string) => Promise<void>;
+  removeChannelMember: (channelId: string, sessionId: string) => Promise<void>;
+  postToChannel: (channelId: string, text: string) => Promise<void>;
 }
 
 const StoreContext = createContext<StoreState | null>(null);
@@ -83,6 +102,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     {},
   );
   const loadedSessionsRef = useRef<Set<string>>(new Set());
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelMessages, setChannelMessages] = useState<
+    Record<string, ChannelMessage[]>
+  >({});
+  const [channelParticipants, setChannelParticipants] = useState<
+    Record<string, string[]>
+  >({});
+  const loadedChannelsRef = useRef<Set<string>>(new Set());
 
   // Track tab visibility for unread + notification gating.
   useEffect(() => {
@@ -250,6 +277,54 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         break;
       }
+      case "channel": {
+        const ch = e.channel;
+        setChannels((prev) => {
+          const idx = prev.findIndex((c) => c.id === ch.id);
+          if (idx < 0) return [...prev, ch];
+          const next = prev.slice();
+          next[idx] = ch;
+          return next;
+        });
+        // create/rename/membership all emit this; refresh participants if loaded.
+        if (loadedChannelsRef.current.has(ch.id)) {
+          getChannelApi(ch.id)
+            .then((d) =>
+              setChannelParticipants((p) => ({ ...p, [ch.id]: d.participants })),
+            )
+            .catch(() => {
+              /* ignore */
+            });
+        }
+        break;
+      }
+      case "channel-removed": {
+        const goneId = e.id;
+        setChannels((prev) => prev.filter((c) => c.id !== goneId));
+        setChannelMessages((prev) => {
+          if (!(goneId in prev)) return prev;
+          const next = { ...prev };
+          delete next[goneId];
+          return next;
+        });
+        setChannelParticipants((prev) => {
+          if (!(goneId in prev)) return prev;
+          const next = { ...prev };
+          delete next[goneId];
+          return next;
+        });
+        loadedChannelsRef.current.delete(goneId);
+        break;
+      }
+      case "channel-message": {
+        const m = e.message;
+        setChannelMessages((prev) => {
+          const list = prev[m.channelId] ?? [];
+          if (list.some((x) => x.id === m.id)) return prev;
+          return { ...prev, [m.channelId]: [...list, m] };
+        });
+        break;
+      }
     }
   }, []);
 
@@ -316,6 +391,82 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (sessionId: string, text: string) => startAgentApi(sessionId, text),
     [],
   );
+
+  // Initial channel roster (WS keeps it live afterwards).
+  useEffect(() => {
+    listChannels()
+      .then(setChannels)
+      .catch(() => {
+        /* backend may be down */
+      });
+  }, []);
+
+  const ensureChannelDetail = useCallback(async (channelId: string) => {
+    if (loadedChannelsRef.current.has(channelId)) return;
+    loadedChannelsRef.current.add(channelId);
+    try {
+      const d = await getChannelApi(channelId);
+      setChannelMessages((prev) => ({ ...prev, [channelId]: d.messages }));
+      setChannelParticipants((prev) => ({ ...prev, [channelId]: d.participants }));
+    } catch {
+      loadedChannelsRef.current.delete(channelId);
+    }
+  }, []);
+
+  const createChannel = useCallback(
+    async (name: string, participants: string[]) => {
+      const { channel, participants: parts } = await createChannelApi(
+        name,
+        participants,
+      );
+      setChannels((prev) =>
+        prev.some((c) => c.id === channel.id) ? prev : [...prev, channel],
+      );
+      setChannelParticipants((prev) => ({ ...prev, [channel.id]: parts }));
+      setChannelMessages((prev) => ({ ...prev, [channel.id]: [] }));
+      loadedChannelsRef.current.add(channel.id);
+      return channel;
+    },
+    [],
+  );
+
+  const renameChannel = useCallback(async (channelId: string, name: string) => {
+    const ch = await renameChannelApi(channelId, name);
+    setChannels((prev) => prev.map((c) => (c.id === channelId ? ch : c)));
+  }, []);
+
+  const deleteChannel = useCallback(async (channelId: string) => {
+    setChannels((prev) => prev.filter((c) => c.id !== channelId));
+    loadedChannelsRef.current.delete(channelId);
+    await deleteChannelApi(channelId);
+  }, []);
+
+  const addChannelMember = useCallback(
+    async (channelId: string, sessionId: string) => {
+      const parts = await addChannelParticipant(channelId, sessionId);
+      setChannelParticipants((prev) => ({ ...prev, [channelId]: parts }));
+    },
+    [],
+  );
+
+  const removeChannelMember = useCallback(
+    async (channelId: string, sessionId: string) => {
+      const parts = await removeChannelParticipant(channelId, sessionId);
+      setChannelParticipants((prev) => ({ ...prev, [channelId]: parts }));
+    },
+    [],
+  );
+
+  const postToChannel = useCallback(async (channelId: string, text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const m = await postChannelMessageApi(channelId, trimmed);
+    setChannelMessages((prev) => {
+      const list = prev[channelId] ?? [];
+      if (list.some((x) => x.id === m.id)) return prev;
+      return { ...prev, [channelId]: [...list, m] };
+    });
+  }, []);
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
   useEffect(() => {
@@ -410,6 +561,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       settings,
       updateSettings,
       markSessionRead,
+      channels,
+      channelMessages,
+      channelParticipants,
+      ensureChannelDetail,
+      createChannel,
+      renameChannel,
+      deleteChannel,
+      addChannelMember,
+      removeChannelMember,
+      postToChannel,
     }),
     [
       sessions,
@@ -434,6 +595,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       settings,
       updateSettings,
       markSessionRead,
+      channels,
+      channelMessages,
+      channelParticipants,
+      ensureChannelDetail,
+      createChannel,
+      renameChannel,
+      deleteChannel,
+      addChannelMember,
+      removeChannelMember,
+      postToChannel,
     ],
   );
 
