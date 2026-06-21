@@ -1,6 +1,6 @@
 # Beacon 架构设计
 
-> 适用版本:v0.5.4。本文是平台的事实源总览——讲清整体结构、数据流、对外接口、核心机制
+> 最后对齐 v0.7.6。本文是平台的事实源总览——讲清整体结构、数据流、对外接口、核心机制
 > 与关键设计决策。具体某次实现的委托规范见 `docs/` 下其余文件;升级与契约策略见
 > [versioning.md](./versioning.md)。
 
@@ -38,7 +38,7 @@ src/server      网关
   pty.ts          嵌入终端的 PTY WebSocket 服务(node-pty)
   wake.ts         离线 agent 的 headless 唤醒(回退路径)
 src/mcp         MCP stdio server —— agent 接入的"南向"之一
-  server.ts       5 个工具的 stdio 入口
+  server.ts       核心 5 个工具的 stdio 入口(后续 agent↔agent 与 spawn 工具见 CHANGELOG)
   tools.ts        工具定义的单一事实源(stdio 与 HTTP 共用)
 src/backends    ChatBackend 接缝(contract.ts),人侧界面可插拔
 skill/beacon    零配置接入 skill:SKILL.md + 自包含 beacon.mjs(直连 HTTP API)
@@ -54,8 +54,8 @@ scripts         sim-agent.ts、mcp-e2e.ts 等
 
 底层都是同一组 HTTP API(`/api/sessions/*`、`/api/asks/*`),三种接入方式:
 
-1. **MCP stdio**(`src/mcp/server.ts`):暴露 5 个工具——`register_session`、`notify_human`、
-   `ask_human`、`update_status`、`check_inbox`。
+1. **MCP stdio**(`src/mcp/server.ts`):对外暴露一组核心工具(完整清单与命令见
+   [`docs/connect-agent.md`](./connect-agent.md);后续 agent↔agent 与 spawn 工具见 CHANGELOG)。
 2. **MCP over HTTP**(`src/server/mcp-http.ts`):托管在 `/mcp`,一条全局命令即可接入,平台升级
    时命令不变(URL 即契约)。工具定义与 stdio 共用 `src/mcp/tools.ts`。
 3. **零配置 skill**(`skill/beacon/beacon.mjs`):直接调那组 HTTP API,给 Claude Code 用,无需 MCP。

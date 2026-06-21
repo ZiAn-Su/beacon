@@ -7,11 +7,11 @@
 
 升级只改实现,不动这三层对外契约,所以**已接入的 agent 无需重新配置**:
 
-1. **MCP 接入命令。** 推荐用托管式 HTTP 端点接入:
+1. **MCP 接入命令。** 完整步骤与替代方式见 [`docs/connect-agent.md`](./connect-agent.md);
+   托管式 HTTP 端点的推荐命令(无本地路径,只有平台 URL;平台升级也无需重配):
    ```
    claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
    ```
-   这条命令里没有任何本地路径,只有平台 URL。无论平台代码怎么升级,只要 URL 不变,这条命令永远有效。
    (旧的 stdio 方式会绑定本地仓库路径,升级若移动了目录就要重配——所以现在默认推荐 HTTP。)
 2. **REST / WebSocket API。** `/api/sessions/*`、`/api/asks/*`、`/ws` 的形状保持稳定。
 3. **skill CLI 命令。** `node beacon.mjs register|notify|ask|status|inbox` 不变。

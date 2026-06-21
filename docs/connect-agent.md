@@ -1,54 +1,60 @@
 # 接入一个 Agent
 
-Beacon 提供两种接入方式，底层是同一组 HTTP API。先启动平台：
+> **Connect an agent to Beacon.** Beacon is an agent-native messaging platform: your
+> AI agent runs long tasks and reaches you with `notify` (FYI) or `ask` (blocks
+> until you answer). This page is the single source of truth for onboarding --
+> install + connect, no path drift across upgrades.
+
+Beacon 提供两种接入方式, 底层是同一组 HTTP API. 先启动平台:
 
 ```bash
 npm run platform   # http://127.0.0.1:4319
 ```
 
-> **推荐**：打开界面，点击左侧栏的「接入 Agent」按钮，平台会自动填好所有绝对路径并生成一键复制的命令。下文是手动参考。
+> **推荐**: 打开界面, 点击左侧栏的 "接入 Agent" 按钮, 平台会自动填好所有绝对路径并生成一键复制的命令. 下文是手动参考.
 
 ---
 
-## 方式一：`/beacon` skill（零配置，推荐给 Claude Code）
+## 方式一: 零配置 skill(推荐给 Claude Code)
 
-不需要 MCP、不需要 `claude mcp add`、不需要绝对路径、不需要重启。把技能装到用户级一次：
+不需要 MCP, 不需要 `claude mcp add`, 不需要绝对路径, 不需要重启. 把技能装到用户级一次:
 
 ```bash
 cp -r skill/beacon ~/.claude/skills/beacon
 # Windows:  xcopy /E /I skill\beacon %USERPROFILE%\.claude\skills\beacon
 ```
 
-之后在任何 Claude Code 会话里，agent 用自带 CLI 跟人对话：
+之后在任何 Claude Code 会话里, agent 用自带 CLI 跟人对话:
 
 ```bash
 node ~/.claude/skills/beacon/beacon.mjs register "我在做的任务"
-node ~/.claude/skills/beacon/beacon.mjs notify   "进度更新…"
+node ~/.claude/skills/beacon/beacon.mjs notify   "进度更新..."
 node ~/.claude/skills/beacon/beacon.mjs ask       "要不要这么干?" "Approve" "Hold"
 node ~/.claude/skills/beacon/beacon.mjs status    done
 node ~/.claude/skills/beacon/beacon.mjs inbox
 ```
 
-会话按工作目录自动缓存，所以 `register` 之后的命令都落在同一对话。
+会话按工作目录自动缓存, 所以 `register` 之后的命令都落在同一对话.
 
 ---
 
-## 方式二：托管 MCP（推荐，全局一条命令）
+## 方式二: 托管 MCP(推荐, 全局一条命令)
 
-Beacon 在 `/mcp` 暴露 Streamable HTTP MCP 端点。注册一次，之后所有项目自动可用：
+Beacon 在 `/mcp` 暴露 Streamable HTTP MCP 端点. 注册一次, 之后所有项目自动可用:
 
 ```bash
 claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
 ```
 
-重启 Claude Code，`/mcp` 列表里出现 `beacon`，拥有五个工具：
+重启 Claude Code, `/mcp` 列表里出现 `beacon`, 拥有核心 5 个工具:
 `register_session` / `notify_human` / `ask_human` / `update_status` / `check_inbox`
+(后续 agent↔agent 与 spawn 工具见 CHANGELOG)
 
 ---
 
-## 方式三：MCP stdio（高级，绑定本地路径）
+## 方式三: MCP stdio(高级, 绑定本地路径)
 
-适合不支持 HTTP MCP 的运行时，或需要精细控制的场景。界面里的「接入 Agent」面板会自动生成填好路径的配置，也可手动：
+适合不支持 HTTP MCP 的运行时, 或需要精细控制的场景. 界面里的 "接入 Agent" 面板会自动生成填好路径的配置, 也可手动:
 
 ```json
 {
@@ -65,17 +71,17 @@ claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
 }
 ```
 
-**注意**：绝对路径因机器而异，建议直接从界面复制。
+**注意**: 绝对路径因机器而异, 建议直接从界面复制.
 
 ---
 
-## 五个能力
+## 核心能力
 
 | 能力 | 阻塞? | 用途 |
 |------|-------|------|
-| `register_session` | 否 | 注册为一个独立联系人（一个任务 = 一个 session） |
-| `notify_human` | 否 | 发"仅供参考"/进度，然后继续工作 |
-| `ask_human` | **是** | 提问并等待答案（返回人的回复） |
+| `register_session` | 否 | 注册为一个独立联系人 (一个任务 = 一个 session) |
+| `notify_human` | 否 | 发 "仅供参考" / 进度, 然后继续工作 |
+| `ask_human` | **是** | 提问并等待答案 (返回人的回复) |
 | `update_status` | 否 | 设置 `working` / `waiting` / `idle` / `done` |
 | `check_inbox` | 否 | 拉取人在你工作期间发来的消息 |
 
@@ -83,4 +89,4 @@ claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
 
 ## 放进 Agent 系统提示的指导语
 
-> 你可以通过 Beacon 与人交流。**不要**事无巨细复述。用 `notify` 报告有意义的进展；仅当真正需要决策才能继续（不可逆操作、需求有歧义、缺关键选项）时用 `ask`——它会阻塞直到对方回答。随工作阶段调 `update_status`；在步骤之间 `check_inbox`，以便人随时把你引导到正确方向。
+> 你可以通过 Beacon 与人交流. **不要**事无巨细复述. 用 `notify` 报告有意义的进展; 仅当真正需要决策才能继续 (不可逆操作, 需求有歧义, 缺关键选项) 时用 `ask` -- 它会阻塞直到对方回答. 随工作阶段调 `update_status`; 在步骤之间 `check_inbox`, 以便人随时把你引导到正确方向.

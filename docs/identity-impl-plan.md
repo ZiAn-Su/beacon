@@ -5,13 +5,13 @@
 
 ## 总分期(build order)
 
-| 阶段 | 内容 | 风险 | 委托性 |
-|---|---|---|---|
-| **P1** | 身份与监护地基(Owner / 永久 contact 身份 / bindKey 续接 / guardian / trustTier)——纯增量后端 | 低 | ✅ 可委托 |
-| P2 | Channel(对话容器)+ Participant;存量 session 消息映射到自动 Direct channel | 中 | 半委托 |
-| P3 | agent↔agent 通信(peer notify/ask + MCP 工具 + peer 消息方向) | 中 | 半委托 |
-| P4 | 授权(三类能力 / 分级信任 / Grant / 审批队列) | 高 | 作者主导 |
-| P5 | 群组 + 人侧 UI 面(联系人档案、监督视图、权限面板) | 中 | 委托 UI |
+| 阶段 | 内容 | 风险 |
+|---|---|---|
+| **P1** | 身份与监护地基(Owner / 永久 contact 身份 / bindKey 续接 / guardian / trustTier)——纯增量后端 | 低 |
+| P2 | Channel(对话容器)+ Participant;存量 session 消息映射到自动 Direct channel | 中 |
+| P3 | agent↔agent 通信(peer notify/ask + MCP 工具 + peer 消息方向) | 中 |
+| P4 | 授权(三类能力 / 分级信任 / Grant / 审批队列) | 高 |
+| P5 | 群组 + 人侧 UI 面(联系人档案、监督视图、权限面板) | 中 |
 
 ---
 
@@ -282,7 +282,7 @@ inbox(id, after): Promise<{ text; createdAt; kind?: string; fromSessionId?: stri
 ## Phase 4 规格(授权 · 切片 1:信任档位 + 逐对 Grant)—— 本次实现
 
 > 把 agent↔agent 的"全局 on/off"升级为**真授权**:每个 agent 的**信任档位** + **逐对放行/拒绝**。
-> 本切片**不做审批队列/held 消息/approve-once-or-always**(那是切片 2,delicate,作者主导)。约定同前。
+> 本切片**不做审批队列/held 消息/approve-once-or-always**(那是切片 2 的内容)。约定同前。
 > **本切片只做后端**(core + gateway),不做 UI。
 
 ### 可触文件(仅此三个)
@@ -348,5 +348,5 @@ export interface Grant { id: string; fromId: string; toId: string; effect: Grant
 
 - 不做审批队列 / held 消息 / approve-once|task|always / 作用域 scope / ingress-egress 跨监护人。
 - 不做 UI(权限面板、信任档位控件)——后续 UI 子任务。
-- 不动 `web/**`、MCP 工具、skill、README、`company/**`、设计文档。
+- 本计划仅修改 `src/` 与 `web/` 子集;不动 MCP 工具、skill、README、设计文档。
 - 不删改现有导出。grants 只加不改;`agentComm` 全局闸保留。
