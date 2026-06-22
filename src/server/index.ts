@@ -569,16 +569,20 @@ app.get('/api/sessions/:id/messages', (req: Request, res: Response) => {
   ok(res, { session, messages: store.messages(param(req,'id')) });
 });
 
-// Frame a 1:1 message typed into an agent's terminal so it knows the message
-// came from its guardian via Beacon and must reply THROUGH Beacon — otherwise a
-// ConPTY agent just answers in the terminal and the human never sees it in chat.
-// English only (src/** stays ASCII); the message text is data, passed verbatim.
-function guardianDeliveryLine(text: string): string {
-  return (
-    `[Beacon: message from your guardian] ${text} ` +
-    `(reply THROUGH Beacon — use your notify_human / ask_human tool, or the beacon skill, ` +
-    `so it reaches them in the app; answering only in this terminal will NOT reach them)`
-  );
+// Frame a 1:1 message typed into an agent's terminal so it knows the text came
+// from its guardian via Beacon and should be answered back through Beacon (not
+// just in the terminal, which the human never sees). Kept compact and tool-
+// agnostic: all metadata (origin, sender, time) lives in the leading bracket so
+// the body stands clear after it, and the reply nudge stays generic — the agent
+// has many Beacon tools and may answer in a channel, not only 1:1. English only
+// (src/** stays ASCII); the message text is data, passed verbatim.
+function stampMMDDHHMM(ts: number): string {
+  const d = new Date(ts);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+function guardianDeliveryLine(text: string, ts: number): string {
+  return `[Beacon · from your guardian · ${stampMMDDHHMM(ts)}] ${text} (reply via Beacon)`;
 }
 
 app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
@@ -614,7 +618,7 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   const baseText = attachments.length
     ? [text.trim(), ...attachments.map((a) => `[image: ${a.path}]`)].filter(Boolean).join(' ')
     : text;
-  const deliveredText = guardianDeliveryLine(baseText);
+  const deliveredText = guardianDeliveryLine(baseText, message.createdAt);
   // If this answer settles a pending spawn request (the owner approving inline
   // from the chat card), perform the launch here — core can't touch the PTY.
   if (rawAskId) {
@@ -666,7 +670,7 @@ app.post('/api/sessions/:id/start', (req: Request, res: Response) => {
   const text = String(req.body?.text ?? '');
   // Frame a non-empty kickoff the same way /reply does, so the agent replies
   // through Beacon rather than only in its terminal.
-  const delivered = text.trim() ? guardianDeliveryLine(text) : text;
+  const delivered = text.trim() ? guardianDeliveryLine(text, Date.now()) : text;
   // Prefer the persistent ConPTY path (same as /reply's on-demand spawn). On
   // Windows its subprocesses inherit a hidden pseudo-console, so the agent's
   // tool calls (bash/git/...) don't pop console windows — unlike a piped
