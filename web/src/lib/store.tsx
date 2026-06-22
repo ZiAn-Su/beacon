@@ -262,11 +262,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           return next;
         });
-        // Unread tracking: only count agent->human messages (notify/ask/chat),
-        // and only if the session is not currently selected or the tab is hidden.
+        // Unread tracking: count agent->human messages (notify/ask/chat) and
+        // agent->agent peer traffic — the owner must stay aware of collaboration
+        // between their agents (it is never invisible). Counted on the recipient
+        // thread (m.sessionId), and only if that session isn't selected or the
+        // tab is hidden.
         if (
           m.direction === "agent" &&
-          (m.kind === "notify" || m.kind === "ask" || m.kind === "chat")
+          (m.kind === "notify" || m.kind === "ask" || m.kind === "chat" || m.kind === "peer")
         ) {
           const sel = selectedIdRef.current;
           const visible = tabVisibleRef.current;

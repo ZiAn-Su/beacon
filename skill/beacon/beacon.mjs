@@ -213,7 +213,11 @@ try {
         const n = (m && (m.name || m.task) || '').trim();
         return n || `agent ${String(sid).slice(0, 8)}`;
       };
-      const out = [`Channel #${detail.channel.name}  (id=${detail.channel.id})`, `Members (${detail.members.length}):`];
+      const out = [
+        `Channel #${detail.channel.name}  (id=${detail.channel.id})`,
+        'Owner: the human guardian (always present in this channel)',
+        `Agent members (${detail.members.length}):`,
+      ];
       for (const m of detail.members) {
         const nm = (m.name || m.task || '').trim() || `agent ${m.id.slice(0, 8)}`;
         out.push(`  - ${nm} [${m.status}] (id=${m.id})${m.about && m.about.trim() ? ` — ${m.about.trim()}` : ''}`);

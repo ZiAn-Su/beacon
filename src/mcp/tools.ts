@@ -831,7 +831,10 @@ function renderChannelDetail(d: {
     return n ? n : `agent ${id.slice(0, 8)}`;
   };
   const out: string[] = [`Channel #${d.channel.name}  (id=${d.channel.id})`];
-  out.push(`Members (${d.members.length}):`);
+  // Every channel includes the human owner — agent collaboration is never
+  // unsupervised. Make that explicit so the agent knows a human is present.
+  out.push('Owner: the human guardian (always present in this channel)');
+  out.push(`Agent members (${d.members.length}):`);
   if (d.members.length === 0) {
     out.push('  (no agents — only you and the guardian)');
   } else {
