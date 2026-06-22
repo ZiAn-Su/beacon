@@ -70,6 +70,13 @@ function Shell() {
   const [theme, setTheme] = useState<Theme>(() => readInitialTheme());
   const [view, setView] = useState<"chats" | "channels" | "contacts">("chats");
   const [contactId, setContactId] = useState<string | null>(null);
+  // When a contact profile links into a group, the channel to auto-select once
+  // the Channels view mounts. Cleared after ChannelsView consumes it.
+  const [channelTarget, setChannelTarget] = useState<string | null>(null);
+  const openChannel = (id: string) => {
+    setChannelTarget(id);
+    setView("channels");
+  };
   const [mobileView, setMobileView] = useState<"contacts" | "conversation">(
     "contacts",
   );
@@ -350,13 +357,19 @@ function Shell() {
                   session={selected}
                   sessions={sessions.filter((s) => s.archivedAt == null)}
                   now={now}
+                  onOpenChannel={openChannel}
                 />
               </div>
             </>
           )}
         </>
       ) : view === "channels" ? (
-        <ChannelsView sessions={sessions} now={now} />
+        <ChannelsView
+          sessions={sessions}
+          now={now}
+          targetChannelId={channelTarget}
+          onTargetConsumed={() => setChannelTarget(null)}
+        />
       ) : (
         <ContactsView
           sessions={sessions}
@@ -367,6 +380,7 @@ function Shell() {
             setView("chats");
             setMobileView("conversation");
           }}
+          onOpenChannel={openChannel}
           onOpenManage={() => setDirectoryOpen(true)}
           onOpenAdd={() => setAddOpen(true)}
         />

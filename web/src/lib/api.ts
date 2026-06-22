@@ -397,6 +397,12 @@ export async function listChannels(): Promise<Channel[]> {
   return (await json<{ channels: Channel[] }>(r)).channels;
 }
 
+// Channels a given session belongs to — for the contact profile's group entries.
+export async function listSessionChannels(sessionId: string): Promise<Channel[]> {
+  const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/member-channels`);
+  return (await json<{ channels: Channel[] }>(r)).channels;
+}
+
 export interface ChannelDetail {
   channel: Channel;
   participants: string[];

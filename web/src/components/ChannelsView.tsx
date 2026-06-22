@@ -13,25 +13,37 @@ import {
   HelpCircle,
   Plus,
   Trash2,
-  UserPlus,
+  Users,
   X,
 } from "lucide-react";
 import type { ChannelMsgKind, Session } from "../types";
 import { useStore } from "../lib/store";
 import { useI18n } from "../lib/i18n";
+import { isOnline } from "../lib/format";
 import { Avatar } from "./Avatar";
 import { EmptyState } from "./EmptyState";
 import { CreateChannelModal } from "./CreateChannelModal";
 
+const STATUS_COLOR: Record<Session["status"], string> = {
+  registered: "var(--color-registered)",
+  working: "var(--color-working)",
+  waiting: "var(--color-waiting)",
+  idle: "var(--color-idle)",
+  done: "var(--color-done)",
+};
+
 interface Props {
   sessions: Session[];
   now: number;
+  // When set (e.g. opened from a contact profile), auto-select this channel.
+  targetChannelId?: string | null;
+  onTargetConsumed?: () => void;
 }
 
 // Group channels view: a channel list on the left, the selected group thread on
 // the right. The human (owner) is implicitly a member of every channel; agents
 // are explicit participants the owner adds. v1 is broadcast chat.
-export function ChannelsView({ sessions, now }: Props) {
+export function ChannelsView({ sessions, now, targetChannelId, onTargetConsumed }: Props) {
   const { t } = useI18n();
   const {
     channels,
@@ -50,11 +62,23 @@ export function ChannelsView({ sessions, now }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [mobileThread, setMobileThread] = useState(false);
 
+  // A deep-link from a contact profile: select the requested channel, then clear
+  // the request so it doesn't fight manual selection.
+  useEffect(() => {
+    if (!targetChannelId) return;
+    if (channels.some((c) => c.id === targetChannelId)) {
+      setSelectedId(targetChannelId);
+      setMobileThread(true);
+      onTargetConsumed?.();
+    }
+  }, [targetChannelId, channels, onTargetConsumed]);
+
   // Keep a valid selection as channels come and go.
   useEffect(() => {
     if (selectedId && channels.some((c) => c.id === selectedId)) return;
+    if (targetChannelId) return; // let the deep-link effect place the selection
     setSelectedId(channels.length ? channels[0]!.id : null);
-  }, [channels, selectedId]);
+  }, [channels, selectedId, targetChannelId]);
 
   useEffect(() => {
     if (selectedId) void ensureChannelDetail(selectedId);
@@ -384,33 +408,53 @@ function ChannelThread({
           </div>
         </div>
 
-        {/* Member avatars */}
-        <div className="hidden items-center sm:flex">
-          {participants.slice(0, 5).map((id, i) => (
-            <span
-              key={id}
-              title={nameFor(id)}
-              style={{ marginLeft: i === 0 ? 0 : -8 }}
-            >
-              <Avatar id={id} label={nameFor(id)} size={26} ring />
-            </span>
-          ))}
-        </div>
-
-        {/* Add member */}
+        {/* Members — one click opens the manage panel (add AND remove). The
+            stacked avatars carry live status so you can see who can receive. */}
         <div className="relative">
           <button
             onClick={() => setAddOpen((v) => !v)}
-            aria-label={t("channels.addMember")}
-            title={t("channels.addMember")}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-colors"
+            aria-label={t("channels.manageMembers")}
+            title={t("channels.manageMembers")}
+            className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 transition-colors"
             style={{
               color: "var(--text-secondary)",
               border: "1px solid var(--border)",
               background: "var(--surface-card)",
             }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--surface-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "var(--surface-card)";
+            }}
           >
-            <UserPlus size={15} />
+            <span className="hidden items-center sm:flex">
+              {participants.slice(0, 4).map((id, i) => {
+                const s = sessionById.get(id);
+                const online = s ? isOnline(s, now) : false;
+                return (
+                  <span
+                    key={id}
+                    className="relative"
+                    title={nameFor(id)}
+                    style={{ marginLeft: i === 0 ? 0 : -8 }}
+                  >
+                    <Avatar id={id} label={nameFor(id)} size={24} ring />
+                    <span
+                      className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full"
+                      style={{
+                        background: online && s ? STATUS_COLOR[s.status] : "var(--text-muted)",
+                        boxShadow: "0 0 0 1.5px var(--bg)",
+                      }}
+                    />
+                  </span>
+                );
+              })}
+            </span>
+            <Users size={15} />
+            <span className="text-[12px] font-medium tabular-nums">
+              {participants.length}
+            </span>
           </button>
           {addOpen && (
             <MemberMenu

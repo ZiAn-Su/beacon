@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Archive, ArchiveRestore, BookUser, Check, CheckSquare, Copy, History, MessageSquare, Pencil, Play, Plus, Search, Square, Terminal, Trash2, User, X } from "lucide-react";
-import type { Session } from "../types";
+import { Archive, ArchiveRestore, BookUser, Check, CheckSquare, Copy, Hash, History, MessageSquare, Pencil, Play, Plus, Search, Square, Terminal, Trash2, User, X } from "lucide-react";
+import type { Channel, Session } from "../types";
 import {
   createGrant,
   deleteGrant,
   listContactRequests,
   listGrants,
+  listSessionChannels,
   type ContactRequest,
   type Grant,
 } from "../lib/api";
@@ -29,13 +30,15 @@ interface Props {
   onSelect: (id: string) => void;
   /** Jump to the chat view for this contact (the "Message" action). */
   onMessage: (id: string) => void;
+  /** Jump to the Channels view and open a specific group. */
+  onOpenChannel?: (channelId: string) => void;
   /** Open the authorization-overview dialog (the "Manage directory" action). */
   onOpenManage: () => void;
   /** Open the "add an agent" dialog (discover existing / create new). */
   onOpenAdd: () => void;
 }
 
-export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpenManage, onOpenAdd }: Props) {
+export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpenChannel, onOpenManage, onOpenAdd }: Props) {
   const { t } = useI18n();
   const { batchSessions } = useStore();
   const [query, setQuery] = useState("");
@@ -256,7 +259,7 @@ export function ContactsView({ sessions, selectedId, onSelect, onMessage, onOpen
       {/* Right: profile detail */}
       <div className="hidden min-w-0 flex-1 md:flex">
         {selected ? (
-          <ContactProfile session={selected} onMessage={onMessage} sessions={active} />
+          <ContactProfile session={selected} onMessage={onMessage} onOpenChannel={onOpenChannel} sessions={active} />
         ) : (
           <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center">
             <div
@@ -367,18 +370,22 @@ function RosterSection({
 export function ContactProfile({
   session,
   onMessage,
+  onOpenChannel,
   sessions,
   now,
 }: {
   session: Session;
   /** When provided, shows a "Message" action (Contacts page); omit in the chat panel. */
   onMessage?: (id: string) => void;
+  /** Jump to a group this contact belongs to. */
+  onOpenChannel?: (channelId: string) => void;
   sessions: Session[];
   now?: number;
 }) {
   const { t, rel } = useI18n();
   const { renameSession, setSessionDescription, setArchived, deleteSession } = useStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [memberChannels, setMemberChannels] = useState<Channel[]>([]);
   const nowMs = now ?? Date.now();
   const label = pathBase(session.workPath) || session.runtime;
   const title = sessionName(session, label);
@@ -400,6 +407,16 @@ export function ContactProfile({
     } catch { /* keep prior */ }
   }, []);
   useEffect(() => { void refresh(); setConfirmDelete(false); }, [refresh, session.id]);
+
+  // The groups this contact belongs to (its joined-channels entry points).
+  useEffect(() => {
+    let live = true;
+    setMemberChannels([]);
+    listSessionChannels(session.id)
+      .then((cs) => { if (live) setMemberChannels(cs); })
+      .catch(() => { /* keep empty */ });
+    return () => { live = false; };
+  }, [session.id]);
 
   // This contact's address book: every agent it can reach or could request —
   // i.e. in its visible scope (same working directory) or already wired by a
@@ -571,6 +588,43 @@ export function ContactProfile({
             <p className="mt-2 text-[11px]" style={{ color: "var(--text-muted)" }}>
               {t("profile.contactsHint")}
             </p>
+          </Section>
+
+          {/* Group channels this agent belongs to — a jump-in entry per group. */}
+          <Section title={t("profile.channels")}>
+            {memberChannels.length === 0 ? (
+              <p className="text-[12.5px]" style={{ color: "var(--text-muted)" }}>
+                {t("profile.noChannels")}
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {memberChannels.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      onClick={() => onOpenChannel?.(c.id)}
+                      disabled={!onOpenChannel}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] transition-colors disabled:cursor-default"
+                      style={{ background: "var(--surface-card)", border: "1px solid var(--border)", color: "var(--text)" }}
+                      onMouseEnter={(e) => { if (onOpenChannel) e.currentTarget.style.background = "var(--surface-hover)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "var(--surface-card)"; }}
+                    >
+                      <span
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                        style={{ background: "var(--bg-sidebar)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+                      >
+                        <Hash size={13} />
+                      </span>
+                      <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
+                      {onOpenChannel && (
+                        <span className="shrink-0 text-[11px]" style={{ color: "var(--accent)" }}>
+                          {t("profile.openChannel")}
+                        </span>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Section>
 
           {/* Timeline */}
