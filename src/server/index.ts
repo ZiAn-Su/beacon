@@ -10,7 +10,7 @@ import express, { type Request, type Response } from 'express';
 import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { bus } from '../core/bus';
 import * as store from '../core/store';
@@ -1044,9 +1044,12 @@ app.get('/api/uploads/:id', (req: Request, res: Response) => {
   res.sendFile(found.path);
 });
 
-app.get('/api/health', (_req: Request, res: Response) =>
-  res.json({ ok: true, version: VERSION, ts: Date.now() })
-);
+app.get('/api/health', (_req: Request, res: Response) => {
+  // Never cache health/version — a stale cached response is exactly what made
+  // the UI keep showing an old version after an update.
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, version: VERSION, ts: Date.now() });
+});
 
 // Everything the "Connect an agent" UI needs: resolved launch command + ready
 // copy-paste snippets per runtime. Paths are resolved server-side so the user
@@ -1120,10 +1123,24 @@ mountMcpHttp(app, {
 // Static frontend (production build) with SPA fallback
 // ----------------------------------------------------------------------------
 if (existsSync(WEB_DIST)) {
-  app.use(express.static(WEB_DIST));
-  app.get(/^(?!\/api\/).*/, (_req: Request, res: Response) =>
-    res.sendFile(join(WEB_DIST, 'index.html'))
+  // Hashed assets (index-<hash>.js/.css) are content-addressed → safe to cache
+  // hard. index.html must NOT be cached, or the browser keeps loading the old
+  // shell that points at the previous bundle — the reason updates "didn't show".
+  app.use(
+    express.static(WEB_DIST, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('index.html')) {
+          res.setHeader('Cache-Control', 'no-cache');
+        } else if (filePath.includes(`${sep}assets${sep}`)) {
+          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+        }
+      },
+    }),
   );
+  app.get(/^(?!\/api\/).*/, (_req: Request, res: Response) => {
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(join(WEB_DIST, 'index.html'));
+  });
 }
 
 // ----------------------------------------------------------------------------
