@@ -18,6 +18,7 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
   const [name, setName] = useState("");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -25,6 +26,7 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
     setName("");
     setPicked(new Set());
     setBusy(false);
+    setError(null);
     const id = window.setTimeout(() => inputRef.current?.focus(), 30);
     return () => window.clearTimeout(id);
   }, [open]);
@@ -57,11 +59,19 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
     });
 
   const submit = async () => {
-    if (busy || !name.trim()) return;
+    if (busy) return;
+    if (!name.trim()) {
+      setError(t("channels.create.nameRequired"));
+      inputRef.current?.focus();
+      return;
+    }
     setBusy(true);
+    setError(null);
     try {
       await onCreate(name.trim(), [...picked]);
       onClose();
+    } catch {
+      setError(t("channels.create.failed"));
     } finally {
       setBusy(false);
     }
@@ -115,7 +125,10 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
           <input
             ref={inputRef}
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (error) setError(null);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
@@ -127,9 +140,14 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
             style={{
               background: "var(--bg)",
               color: "var(--text)",
-              border: "1px solid var(--border-strong)",
+              border: `1px solid ${error ? "var(--danger)" : "var(--border-strong)"}`,
             }}
           />
+          {error && (
+            <p className="mt-1.5 text-[12px]" style={{ color: "var(--danger)" }}>
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto scroll-area px-5 pb-2">
@@ -220,7 +238,7 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
           </button>
           <button
             onClick={() => void submit()}
-            disabled={busy || !name.trim()}
+            disabled={busy}
             className="rounded-lg px-3.5 py-1.5 text-[13px] font-semibold transition-colors disabled:opacity-60"
             style={{
               color: "#fff",
@@ -228,10 +246,10 @@ export function CreateChannelModal({ open, agents, onClose, onCreate }: Props) {
               border: "1px solid var(--accent)",
             }}
             onMouseEnter={(e) => {
-              if (!busy && name.trim()) e.currentTarget.style.background = "var(--accent-2)";
+              if (!busy) e.currentTarget.style.background = "var(--accent-2)";
             }}
             onMouseLeave={(e) => {
-              if (!busy && name.trim()) e.currentTarget.style.background = "var(--accent)";
+              if (!busy) e.currentTarget.style.background = "var(--accent)";
             }}
           >
             {t("channels.create.submit")}

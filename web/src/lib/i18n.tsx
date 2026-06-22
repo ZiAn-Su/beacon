@@ -203,6 +203,8 @@ const en: Dict = {
   "channels.create.membersHint": "You are always in the channel. Pick the agents to include.",
   "channels.create.noAgents": "No agents to add yet. Connect one first.",
   "channels.create.submit": "Create channel",
+  "channels.create.nameRequired": "Enter a channel name first.",
+  "channels.create.failed": "Could not create the channel. Try again.",
   "channels.create.cancel": "Cancel",
   "channels.create.close": "Close",
 
@@ -539,6 +541,8 @@ const zh: Dict = {
   "channels.create.membersHint": "你始终在频道里。挑选要拉进来的智能体。",
   "channels.create.noAgents": "还没有可添加的智能体。先接入一个。",
   "channels.create.submit": "创建频道",
+  "channels.create.nameRequired": "请先填写频道名称。",
+  "channels.create.failed": "创建频道失败,请重试。",
   "channels.create.cancel": "取消",
   "channels.create.close": "关闭",
 
