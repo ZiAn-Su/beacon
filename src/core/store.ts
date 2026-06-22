@@ -1012,6 +1012,18 @@ export function removeGrant(id: string): void {
   deleteGrant.run(id);
 }
 
+/**
+ * Authorize two agents to contact each other (both directions). Used when a
+ * spawner brings a child agent online: the guardian already approved the spawn,
+ * so the spawner may directly message — and group into channels — the agent it
+ * created, without an extra contact approval round-trip.
+ */
+export function grantMutualContact(a: string, b: string): void {
+  if (a === b) return;
+  setGrant(a, b, 'allow');
+  setGrant(b, a, 'allow');
+}
+
 export function listGrants(): Grant[] {
   return selectGrants.all() as Grant[];
 }
@@ -1281,6 +1293,9 @@ export interface SpawnParams {
   runtime: string;
   name?: string | null;
   task?: string | null;
+  // Optional channel the new agent should auto-join on launch (the spawner must
+  // be a member of it). Persisted so an approved-later spawn still joins.
+  channelId?: string | null;
 }
 interface SpawnRow {
   id: string;
@@ -1617,6 +1632,63 @@ export function channelsForSession(sessionId: string): Channel[] {
     (r) => r.channelId,
   );
   return ids.map((id) => getChannel(id)).filter((c): c is Channel => !!c);
+}
+
+/**
+ * An agent adds another agent to a channel it belongs to. Membership lets the
+ * target be broadcast at, so it is gated by the SAME contact authorization as
+ * direct peer messaging: the actor must be a participant of the channel and be
+ * ALLOW-authorized to contact the target. This keeps the invariant that you
+ * cannot pull a stranger agent into a group to message it. The human owner is
+ * always present in every channel, so the addition stays supervised. Idempotent.
+ */
+export function addAgentToChannel(
+  actorId: string,
+  channelId: string,
+  targetId: string,
+): { ok: true } | { ok: false; reason: string } {
+  if (!getChannel(channelId)) return { ok: false, reason: 'channel not found' };
+  if (!isParticipant(channelId, actorId)) {
+    return { ok: false, reason: 'not a participant of this channel' };
+  }
+  if (!getSession(targetId)) return { ok: false, reason: 'no such agent' };
+  if (isParticipant(channelId, targetId)) return { ok: true }; // already in — no-op
+  const verdict = resolvePeerPermission(actorId, targetId);
+  if (verdict !== 'allow') {
+    return {
+      ok: false,
+      reason:
+        verdict === 'approval'
+          ? 'contact requires guardian approval'
+          : 'not authorized to contact this agent',
+    };
+  }
+  addParticipant(channelId, targetId);
+  return { ok: true };
+}
+
+/**
+ * An agent creates a channel (the human owner is implicitly present, as in every
+ * channel) and becomes its first member. Optional initial members are added only
+ * if the creator is allow-authorized to contact each one (see addAgentToChannel);
+ * the rest come back as `skipped` with a reason so the caller can request access.
+ */
+export function createChannelForAgent(
+  creatorId: string,
+  name: string,
+  memberIds: string[] = [],
+): { channel: Channel; added: string[]; skipped: { id: string; reason: string }[] } {
+  const channel = createChannel(name);
+  addParticipant(channel.id, creatorId);
+  const added: string[] = [];
+  const skipped: { id: string; reason: string }[] = [];
+  for (const m of memberIds) {
+    if (m === creatorId || added.includes(m)) continue;
+    const r = addAgentToChannel(creatorId, channel.id, m);
+    if (r.ok) added.push(m);
+    else skipped.push({ id: m, reason: r.reason });
+  }
+  return { channel, added, skipped };
 }
 
 /**

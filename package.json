@@ -11,6 +11,7 @@
     "sim": "tsx scripts/sim-agent.ts",
     "e2e": "node --import tsx scripts/mcp-e2e.ts",
     "e2e:http": "node --import tsx scripts/mcp-http-smoke.ts",
+    "e2e:channels": "node --import tsx scripts/channel-org-smoke.ts",
     "build:web": "cd web && npm install && npm run build",
     "start": "npm run build:web && npm run platform",
     "update": "git pull && npm install && npm run build:web",

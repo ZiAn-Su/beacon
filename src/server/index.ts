@@ -374,6 +374,10 @@ function spawnAgent(params: {
   name?: string | null;
   task?: string | null;
   origin: 'agent' | 'human';
+  // When an agent spawns another, who spawned it (enables parent<->child contact
+  // authorization) and an optional channel for the child to auto-join on launch.
+  spawnerId?: string | null;
+  channelId?: string | null;
 }) {
   const session = store.createSession({
     runtime: params.runtime || 'claude-code',
@@ -382,6 +386,14 @@ function spawnAgent(params: {
     name: params.name ?? null,
     origin: params.origin,
   });
+  // An agent-spawned child is the spawner's own creation: authorize them to
+  // contact and group each other (the guardian already approved the spawn), then
+  // optionally drop the child straight into a channel the spawner belongs to.
+  if (params.origin === 'agent' && params.spawnerId && store.getSession(params.spawnerId)) {
+    store.grantMutualContact(params.spawnerId, session.id);
+    const ch = params.channelId?.trim();
+    if (ch) store.addAgentToChannel(params.spawnerId, ch, session.id);
+  }
   // The agent's first registration (any transport) attaches to THIS contact
   // instead of opening a duplicate.
   store.markPendingLaunch(session.id);
@@ -534,6 +546,7 @@ app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
     runtime: String(body.runtime ?? 'claude-code'),
     name: body.name != null ? String(body.name) : null,
     task: body.task != null ? String(body.task) : null,
+    channelId: body.channelId != null ? String(body.channelId) : null,
   };
   store.touchSeen(id);
   const verdict = store.resolveCapability(id, 'spawn_agent');
@@ -544,7 +557,7 @@ app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
     const askId = store.createSpawnRequest(id, params);
     ok(res, { status: 'pending', askId }); return;
   }
-  const { session, launched } = spawnAgent({ ...params, origin: 'agent' });
+  const { session, launched } = spawnAgent({ ...params, origin: 'agent', spawnerId: id });
   ok(res, { status: 'spawned', session, launched });
 });
 
@@ -555,7 +568,7 @@ app.post('/api/spawn-requests/:askId/decide', (req: Request, res: Response) => {
   if (!sr || sr.status !== 'pending') { res.status(404).json({ error: 'no pending spawn request' }); return; }
   const approve = req.body?.approve !== false;
   let spawned: unknown = null;
-  if (approve) spawned = spawnAgent({ ...sr.params, origin: 'agent' }).session;
+  if (approve) spawned = spawnAgent({ ...sr.params, origin: 'agent', spawnerId: sr.spawnerId }).session;
   store.decideSpawnRequest(askId, approve);
   // Resolve the backing ask so the spawner unblocks / the card stops being pending.
   const ask = store.getAsk(askId);
@@ -643,7 +656,7 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
     const sr = store.getSpawnRequestByAsk(rawAskId);
     if (sr && sr.status === 'pending') {
       const approve = text.trim() === 'approve';
-      if (approve) spawnAgent({ ...sr.params, origin: 'agent' });
+      if (approve) spawnAgent({ ...sr.params, origin: 'agent', spawnerId: sr.spawnerId });
       store.decideSpawnRequest(rawAskId, approve);
     }
   }
@@ -981,6 +994,38 @@ app.post('/api/sessions/:id/channel-answer', (req: Request, res: Response) => {
   ok(res, { message });
 });
 
+// An agent creates a channel (the human owner is always present in it). It
+// becomes the first member; optional initial members are added only if the
+// creator is allow-authorized to contact each. body { name, memberIds? }.
+app.post('/api/sessions/:id/create-channel', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const name = String(req.body?.name ?? '').trim();
+  if (!name) { res.status(400).json({ error: 'name is required' }); return; }
+  const memberIds = Array.isArray(req.body?.memberIds) ? req.body.memberIds.map(String) : [];
+  store.touchSeen(id);
+  const result = store.createChannelForAgent(id, name, memberIds);
+  ok(res, result);
+});
+
+// An agent adds another agent to a channel it belongs to. Gated by the same
+// contact authorization as peer messaging. body { channelId, agentId }.
+app.post('/api/sessions/:id/add-to-channel', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const channelId = String(req.body?.channelId ?? '');
+  const agentId = String(req.body?.agentId ?? '');
+  store.touchSeen(id);
+  const r = store.addAgentToChannel(id, channelId, agentId);
+  if (!r.ok) {
+    const code = r.reason === 'channel not found' || r.reason === 'no such agent' ? 404 : 403;
+    res.status(code).json({ error: r.reason }); return;
+  }
+  ok(res, { participants: store.listParticipants(channelId) });
+});
+
 // Channels an agent belongs to (for its addressing/list view).
 app.get('/api/sessions/:id/channels', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
@@ -1134,7 +1179,7 @@ app.get('/api/connect-info', (req: Request, res: Response) => {
 // ----------------------------------------------------------------------------
 mountMcpHttp(app, {
   token: PLATFORM_TOKEN,
-  spawn: (params) => spawnAgent({ ...params, origin: 'agent' }),
+  spawn: (params, spawnerId) => spawnAgent({ ...params, origin: 'agent', spawnerId }),
 });
 
 // ----------------------------------------------------------------------------

@@ -20,12 +20,16 @@ import { fanOutChannelMessage } from './channel-delivery';
 
 // The launch side effect (PTY) lives in the gateway; the hosted MCP receives it
 // as a callback so spawn_agent can run in-process without reaching back over HTTP.
-type SpawnFn = (params: {
-  workPath: string;
-  runtime: string;
-  name?: string | null;
-  task?: string | null;
-}) => { session: { id: string } };
+type SpawnFn = (
+  params: {
+    workPath: string;
+    runtime: string;
+    name?: string | null;
+    task?: string | null;
+    channelId?: string | null;
+  },
+  spawnerId: string,
+) => { session: { id: string } };
 
 // Direct, in-process ops backed by the core store (no HTTP round-trip).
 function storeOps(spawnFn: SpawnFn): AgentOps {
@@ -131,12 +135,13 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
         runtime: params.runtime ?? 'claude-code',
         name: params.name ?? null,
         task: params.task ?? null,
+        channelId: params.channelId ?? null,
       };
       if (v === 'ask') {
         const askId = store.createSpawnRequest(spawnerId, p);
         return { status: 'pending', askId };
       }
-      const { session } = spawnFn(p);
+      const { session } = spawnFn(p, spawnerId);
       return { status: 'spawned', agentId: session.id };
     },
     async listChannels(forId) {
@@ -166,6 +171,14 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
         throw new Error('not a participant of this channel');
       }
       fanOutChannelMessage(store.answerChannelAsk(channelId, askId, fromId, text));
+    },
+    async createChannel(forId, name, memberIds) {
+      return store.createChannelForAgent(forId, name, memberIds ?? []);
+    },
+    async addToChannel(forId, channelId, agentId) {
+      const r = store.addAgentToChannel(forId, channelId, agentId);
+      if (!r.ok) return { ok: false, reason: r.reason };
+      return { ok: true, participants: store.listParticipants(channelId) };
     },
     async channelInbox(id, after) {
       return store.channelInbox(id, after);

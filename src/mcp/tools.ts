@@ -57,11 +57,29 @@ export interface AgentOps {
   ): Promise<{ status: string; askId?: string }>;
   spawn(
     spawnerId: string,
-    params: { workPath: string; runtime?: string; name?: string | null; task?: string | null },
+    params: {
+      workPath: string;
+      runtime?: string;
+      name?: string | null;
+      task?: string | null;
+      channelId?: string | null;
+    },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
   // Group channels: a channel fans a message out to all its members (other
   // agents + the human guardian). v1 is broadcast chat; v2 adds blocking asks.
   listChannels(forId: string): Promise<{ id: string; name: string }[]>;
+  // Agent-side channel organization: create a channel (the human owner is always
+  // present) and add agents you are authorized to contact.
+  createChannel(
+    forId: string,
+    name: string,
+    memberIds?: string[],
+  ): Promise<{ channel: { id: string; name: string }; added: string[]; skipped: { id: string; reason: string }[] }>;
+  addToChannel(
+    forId: string,
+    channelId: string,
+    agentId: string,
+  ): Promise<{ ok: boolean; reason?: string; participants?: string[] }>;
   postChannel(fromId: string, channelId: string, text: string, toSessionId?: string | null): Promise<void>;
   askChannel(
     fromId: string,
@@ -164,10 +182,15 @@ export function registerBeaconTools(
 
   async function ensure(task?: string): Promise<string> {
     if (sessionId) return sessionId;
+    // Honor the documented contract that notify/ask auto-creates a session even
+    // when the agent never called register_session and set no AGENT_TASK: fall
+    // back to a placeholder task so registration can't 400 ("task is required").
+    // The agent can refine it later via register_session / update_profile.
+    const resolvedTask = (task ?? defaults.task ?? '').trim() || '(auto-registered agent)';
     const { id } = await ops.register({
       runtime: defaults.runtime,
       workPath: defaults.workPath,
-      task: task ?? defaults.task,
+      task: resolvedTask,
       nativeSessionId: defaults.nativeSessionId ?? null,
       name: defaults.name ?? null,
       description: defaults.description ?? null,
@@ -519,11 +542,15 @@ export function registerBeaconTools(
         runtime: z.string().optional().describe('Runtime, e.g. "claude-code" (default)'),
         name: z.string().optional().describe('Display name for the new agent'),
         task: z.string().optional().describe('What the new agent should work on'),
+        channel_id: z
+          .string()
+          .optional()
+          .describe('Optional: a channel you belong to that the new agent auto-joins on launch'),
       },
     },
-    async ({ work_path, runtime, name, task }) => {
+    async ({ work_path, runtime, name, task, channel_id }) => {
       const id = await ensure();
-      const r = await ops.spawn(id, { workPath: work_path, runtime, name, task });
+      const r = await ops.spawn(id, { workPath: work_path, runtime, name, task, channelId: channel_id });
       if (r.status === 'spawned') {
         return {
           content: [{ type: 'text', text: `Spawned agent ${r.agentId}.` }],
@@ -571,6 +598,63 @@ export function registerBeaconTools(
         ? channels.map((c) => `${c.id} — ${c.name}`).join('\n')
         : '(you are not in any channels yet)';
       return { content: [{ type: 'text', text }] };
+    },
+  );
+
+  server.registerTool(
+    'create_channel',
+    {
+      title: 'Create a group channel',
+      description:
+        'Create a new group channel and become its first member. The human guardian is always ' +
+        'present as the owner, so group collaboration stays supervised. Optionally pass member ids ' +
+        '(from list_agents) to add at creation — each is added only if you are authorized to contact ' +
+        'it; the rest come back as skipped so you can request_contact and add_to_channel later. ' +
+        'Use this to self-organize your team instead of asking the human to wire up a channel.',
+      inputSchema: {
+        name: z.string().describe('Channel name (e.g. "release-team")'),
+        member_ids: z
+          .array(z.string())
+          .optional()
+          .describe('Optional initial members (agent ids from list_agents)'),
+      },
+    },
+    async ({ name, member_ids }) => {
+      const id = await ensure();
+      const r = await ops.createChannel(id, name, member_ids);
+      const lines = [
+        `Created channel #${r.channel.name} (id=${r.channel.id}). You are a member; the human owner is present.`,
+      ];
+      if (r.added.length) lines.push(`Added ${r.added.length} member(s).`);
+      if (r.skipped.length) {
+        lines.push(
+          `Skipped (not added): ${r.skipped.map((s) => `${s.id} — ${s.reason}`).join('; ')}.`,
+        );
+      }
+      return { content: [{ type: 'text', text: lines.join(' ') }] };
+    },
+  );
+
+  server.registerTool(
+    'add_to_channel',
+    {
+      title: 'Add an agent to a channel',
+      description:
+        'Add another agent to a group channel you belong to. Subject to the same authorization as ' +
+        'contacting it directly: you must be allowed to contact the agent (agents you spawned are ' +
+        'authorized automatically). Use agent_id from list_agents and channel_id from list_channels.',
+      inputSchema: {
+        channel_id: z.string().describe('Target channel id (from list_channels) — you must be a member'),
+        agent_id: z.string().describe('Agent id to add (from list_agents)'),
+      },
+    },
+    async ({ channel_id, agent_id }) => {
+      const id = await ensure();
+      const r = await ops.addToChannel(id, channel_id, agent_id);
+      if (!r.ok) {
+        return { content: [{ type: 'text', text: `Could not add: ${r.reason ?? 'unknown error'}` }] };
+      }
+      return { content: [{ type: 'text', text: 'Added to channel.' }] };
     },
   );
 
@@ -1060,6 +1144,7 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
             runtime: params.runtime ?? 'claude-code',
             name: params.name ?? null,
             task: params.task ?? null,
+            channelId: params.channelId ?? null,
           }),
         },
       );
@@ -1070,6 +1155,31 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         `/api/sessions/${forId}/channels`,
       );
       return channels.map((c) => ({ id: c.id, name: c.name }));
+    },
+    async createChannel(forId, name, memberIds) {
+      return api<{
+        channel: { id: string; name: string };
+        added: string[];
+        skipped: { id: string; reason: string }[];
+      }>(`/api/sessions/${forId}/create-channel`, {
+        method: 'POST',
+        body: JSON.stringify({ name, memberIds: memberIds ?? [] }),
+      });
+    },
+    async addToChannel(forId, channelId, agentId) {
+      try {
+        const r = await api<{ participants: string[] }>(
+          `/api/sessions/${forId}/add-to-channel`,
+          { method: 'POST', body: JSON.stringify({ channelId, agentId }) },
+        );
+        return { ok: true, participants: r.participants };
+      } catch (e) {
+        // The REST route returns 403/404 with { error } for an unauthorized or
+        // unknown target; surface that as a clean reason instead of throwing.
+        const msg = e instanceof Error ? e.message : String(e);
+        const m = msg.match(/\{"error":"([^"]+)"\}/);
+        return { ok: false, reason: m ? m[1] : msg };
+      }
     },
     async postChannel(fromId, channelId, text, toSessionId) {
       await api(`/api/sessions/${fromId}/channel-post`, {
