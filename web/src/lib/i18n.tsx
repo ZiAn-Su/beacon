@@ -117,6 +117,9 @@ const en: Dict = {
   "composer.newline": "for newline",
   "composer.send": "Send",
   "composer.answering": "Answering",
+  "composer.attachImage": "Attach image",
+  "composer.removeImage": "Remove image",
+  "composer.uploading": "Uploading…",
 
   "status.registered": "Registered",
   "status.working": "Working",
@@ -450,6 +453,9 @@ const zh: Dict = {
   "composer.newline": "换行",
   "composer.send": "发送",
   "composer.answering": "回答中",
+  "composer.attachImage": "添加图片",
+  "composer.removeImage": "移除图片",
+  "composer.uploading": "上传中…",
 
   "status.registered": "已注册",
   "status.working": "工作中",

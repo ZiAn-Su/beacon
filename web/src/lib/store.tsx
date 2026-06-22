@@ -55,6 +55,7 @@ interface StoreState {
     sessionId: string,
     text: string,
     askId?: string | null,
+    attachments?: { id: string; name: string }[],
   ) => Promise<AgentDelivery | undefined>;
   cancelAsk: (askId: string) => Promise<void>;
   renameSession: (sessionId: string, title: string | null) => Promise<void>;
@@ -367,10 +368,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const send = useCallback(
-    async (sessionId: string, text: string, askId?: string | null) => {
+    async (
+      sessionId: string,
+      text: string,
+      askId?: string | null,
+      attachments?: { id: string; name: string }[],
+    ) => {
       const trimmed = text.trim();
-      if (!trimmed) return undefined;
-      const { message, agent } = await reply(sessionId, trimmed, askId ?? null);
+      if (!trimmed && !(attachments && attachments.length)) return undefined;
+      const { message, agent } = await reply(sessionId, trimmed, askId ?? null, attachments);
       setMessagesBySession((prev) => {
         const list = prev[sessionId] ?? [];
         if (list.some((x) => x.id === message.id)) return prev;

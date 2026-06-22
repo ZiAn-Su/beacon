@@ -1,4 +1,4 @@
-import type { Channel, ChannelMessage, Message, Session } from "../types";
+import type { Attachment, Channel, ChannelMessage, Message, Session } from "../types";
 
 // Typed wrappers for the north-side REST contract. In dev Vite proxies
 // `/api` -> http://127.0.0.1:4319, so we just use relative URLs.
@@ -152,13 +152,42 @@ export async function reply(
   sessionId: string,
   text: string,
   askId?: string | null,
+  attachments?: { id: string; name: string }[],
 ): Promise<ReplyResult> {
+  const body: Record<string, unknown> = { text };
+  if (askId) body.askId = askId;
+  if (attachments && attachments.length) body.attachments = attachments;
   const r = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/reply`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(askId ? { text, askId } : { text }),
+    body: JSON.stringify(body),
   });
   return json<ReplyResult>(r);
+}
+
+/** Read a File as base64 (no data: prefix) for the upload endpoint. */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result);
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** Upload an image file; returns the saved attachment (url + path). */
+export async function uploadImage(file: File): Promise<Attachment> {
+  const dataBase64 = await fileToBase64(file);
+  const r = await fetch("/api/uploads", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: file.name, mime: file.type, dataBase64 }),
+  });
+  return (await json<{ upload: Attachment }>(r)).upload;
 }
 
 /** One-click "start the offline agent now". */

@@ -98,9 +98,32 @@ export function MessageItem({
 
   // Human (chat or answer) - right-aligned bubble, readable text
   const showDelivery = message.direction === "human" && message.kind === "chat";
+  const attachments = message.meta?.attachments ?? [];
   return (
     <div className="flex justify-end">
       <div className="flex max-w-[80%] flex-col items-end gap-1.5">
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {attachments.map((a) => (
+              <a
+                key={a.id}
+                href={a.url}
+                target="_blank"
+                rel="noreferrer"
+                className="block overflow-hidden rounded-xl"
+                style={{ border: "1px solid var(--border)", maxWidth: 220 }}
+                title={a.name}
+              >
+                <img
+                  src={a.url}
+                  alt={a.name}
+                  className="block max-h-[220px] w-auto object-cover"
+                />
+              </a>
+            ))}
+          </div>
+        )}
+        {message.text.trim().length > 0 && (
         <div
           className="rounded-2xl rounded-tr-md px-3.5 py-2.5 text-sm leading-relaxed"
           style={{
@@ -113,6 +136,7 @@ export function MessageItem({
         >
           {message.text}
         </div>
+        )}
         <div className="flex items-center gap-1">
           {isLast && <Timestamp time={message.createdAt} />}
           {showDelivery && message.deliveredAt != null && (

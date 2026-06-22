@@ -44,8 +44,13 @@ export function Conversation({
   }, [session.id]);
 
   const handleSend = useCallback(
-    async (sessionId: string, text: string, askId?: string | null) => {
-      return await send(sessionId, text, askId);
+    async (
+      sessionId: string,
+      text: string,
+      askId?: string | null,
+      attachments?: { id: string; name: string }[],
+    ) => {
+      return await send(sessionId, text, askId, attachments);
     },
     [send],
   );

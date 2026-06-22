@@ -39,6 +39,16 @@ export interface Session {
 export type MsgDirection = "agent" | "human";
 export type MsgKind = "notify" | "ask" | "answer" | "chat" | "status" | "peer";
 
+// An image the human attached to a message. `url` serves the thumbnail; `path`
+// is the absolute file path handed to the agent.
+export interface Attachment {
+  id: string;
+  name: string;
+  mime: string;
+  url: string;
+  path: string;
+}
+
 export interface Message {
   id: string;
   sessionId: string;
@@ -50,6 +60,8 @@ export interface Message {
   askId: string | null;
   meta: {
     options?: string[];
+    // Image attachments on a human message.
+    attachments?: Attachment[];
     // Present when this ask backs an agent-initiated contact request; the UI
     // renders a localized approval card and the approve/deny option tokens.
     contactRequest?: { fromId: string; toId: string; reason?: string | null };

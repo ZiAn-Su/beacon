@@ -4,11 +4,13 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { ArrowUp, HelpCircle } from "lucide-react";
-import type { Message, Session } from "../types";
+import { ArrowUp, HelpCircle, ImagePlus, X } from "lucide-react";
+import type { Attachment, Message, Session } from "../types";
 import { classNames } from "../lib/format";
+import { uploadImage } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -18,6 +20,7 @@ interface Props {
     sessionId: string,
     text: string,
     askId?: string | null,
+    attachments?: { id: string; name: string }[],
   ) => Promise<string | undefined>;
 }
 
@@ -27,7 +30,42 @@ export function Composer({ session, pendingAsk, onSend }: Props) {
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploading, setUploading] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  // Upload image files (from paste or the picker) and stage them as attachments.
+  const addFiles = useCallback(async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    if (images.length === 0) return;
+    setUploading(true);
+    try {
+      for (const f of images) {
+        try {
+          const up = await uploadImage(f);
+          setAttachments((prev) => [...prev, up]);
+        } catch {
+          /* skip a file that failed to upload */
+        }
+      }
+    } finally {
+      setUploading(false);
+    }
+  }, []);
+
+  const onPaste = useCallback(
+    (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) =>
+        f.type.startsWith("image/"),
+      );
+      if (files.length > 0) {
+        e.preventDefault();
+        void addFiles(files);
+      }
+    },
+    [addFiles],
+  );
 
   // Auto-grow the textarea to its content, capped at MAX_HEIGHT.
   const autosize = useCallback(() => {
@@ -44,21 +82,32 @@ export function Composer({ session, pendingAsk, onSend }: Props) {
   // Reset the composer when switching sessions.
   useEffect(() => {
     setValue("");
+    setAttachments([]);
   }, [session.id]);
 
   const submit = useCallback(
     async (textOverride?: string) => {
       const text = (textOverride ?? value).trim();
-      if (!text || sending) return;
+      // Ask quick-replies (textOverride) never carry attachments.
+      const atts = textOverride == null ? attachments : [];
+      if ((!text && atts.length === 0) || sending) return;
       setSending(true);
       try {
-        await onSend(session.id, text, pendingAsk?.askId ?? null);
-        if (textOverride == null) setValue("");
+        await onSend(
+          session.id,
+          text,
+          pendingAsk?.askId ?? null,
+          atts.map((a) => ({ id: a.id, name: a.name })),
+        );
+        if (textOverride == null) {
+          setValue("");
+          setAttachments([]);
+        }
       } finally {
         setSending(false);
       }
     },
-    [value, sending, onSend, session.id, pendingAsk?.askId],
+    [value, attachments, sending, onSend, session.id, pendingAsk?.askId],
   );
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -74,7 +123,8 @@ export function Composer({ session, pendingAsk, onSend }: Props) {
       ? t("composer.reply")
       : t("composer.message");
 
-  const sendDisabled = value.trim().length === 0 || sending;
+  const sendDisabled =
+    (value.trim().length === 0 && attachments.length === 0) || sending || uploading;
 
   return (
     <div
@@ -86,6 +136,40 @@ export function Composer({ session, pendingAsk, onSend }: Props) {
           <PendingAskBar ask={pendingAsk} onPick={(opt) => void submit(opt)} />
         )}
 
+        {(attachments.length > 0 || uploading) && (
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            {attachments.map((a) => (
+              <div
+                key={a.id}
+                className="group relative h-16 w-16 overflow-hidden rounded-lg"
+                style={{ border: "1px solid var(--border)" }}
+                title={a.name}
+              >
+                <img src={a.url} alt={a.name} className="h-full w-full object-cover" />
+                <button
+                  onClick={() => setAttachments((prev) => prev.filter((x) => x.id !== a.id))}
+                  aria-label={t("composer.removeImage")}
+                  className="absolute right-0.5 top-0.5 flex h-5 w-5 items-center justify-center rounded-full"
+                  style={{ background: "rgba(0,0,0,0.55)", color: "#fff" }}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+            {uploading && (
+              <div
+                className="flex h-16 w-16 items-center justify-center rounded-lg text-[11px]"
+                style={{
+                  border: "1px dashed var(--border)",
+                  color: "var(--text-muted)",
+                }}
+              >
+                {t("composer.uploading")}
+              </div>
+            )}
+          </div>
+        )}
+
         <div
           className="relative flex items-end gap-2 rounded-2xl px-3 py-2 transition-shadow"
           style={{
@@ -94,11 +178,39 @@ export function Composer({ session, pendingAsk, onSend }: Props) {
             boxShadow: "var(--shadow-1)",
           }}
         >
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              void addFiles(Array.from(e.target.files ?? []));
+              e.target.value = "";
+            }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            disabled={sending}
+            aria-label={t("composer.attachImage")}
+            title={t("composer.attachImage")}
+            className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-colors duration-150"
+            style={{ color: "var(--text-muted)", background: "transparent" }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--surface-hover)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <ImagePlus size={17} />
+          </button>
           <textarea
             ref={taRef}
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
             placeholder={placeholder}
             rows={1}
             spellCheck
