@@ -190,8 +190,8 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       }
       return store.readChannelDetail(channelId, limit ?? 50, forId) ?? null;
     },
-    async getAgent(_forId, agentId) {
-      return store.agentProfile(agentId) ?? null;
+    async getAgent(forId, agentId) {
+      return store.agentProfile(agentId, forId) ?? null;
     },
     async whoami(forId) {
       const state = store.whoamiState(forId);

@@ -1065,7 +1065,7 @@ app.get('/api/sessions/:id/agent/:agentId', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   const id = param(req, 'id');
   if (!store.getSession(id)) return notFound(res);
-  const profile = store.agentProfile(param(req, 'agentId'));
+  const profile = store.agentProfile(param(req, 'agentId'), id);
   if (!profile) return notFound(res);
   ok(res, { profile });
 });

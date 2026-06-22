@@ -130,6 +130,8 @@ export interface AgentOps {
     status: string;
     runtime: string;
     origin: string;
+    lastSeenAt: number | null;
+    lastActivity: { kind: string; text: string; createdAt: number; channel: string | null } | null;
   } | null>;
   whoami(forId: string): Promise<{
     id: string;
@@ -807,9 +809,12 @@ export function registerBeaconTools(
     {
       title: 'Look up another agent\'s profile',
       description:
-        'Pull a peer agent\'s public profile — display name, what it is working on, its ' +
-        'self-introduction, runtime, and current status — so you can decide whether and who to ' +
-        'ask. Use an agent id from list_agents, a channel roster, or an inbox message.',
+        'Pull a peer agent\'s profile and presence: display name, task, self-introduction, runtime, ' +
+        'current status, when it was last seen, and (for agents you are authorized to contact, such ' +
+        'as ones you spawned) its most recent activity — so you can tell a working agent apart from ' +
+        'one that paused, stalled, or finished, and orchestrate accordingly. Poll this on a child ' +
+        'you spawned instead of waiting for it to post. Use an agent id from list_agents, a channel ' +
+        'roster, or an inbox message.',
       inputSchema: {
         agent_id: z.string().describe('The agent id to look up'),
       },
@@ -967,7 +972,20 @@ function renderChannelDetail(d: {
   return out.join('\n');
 }
 
-/** Render get_agent: a peer's profile so the reader can decide who to ask. */
+/** A coarse, human-readable "how long ago" for a timestamp. */
+function agoText(ts: number | null): string {
+  if (!ts) return 'never';
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+/** Render get_agent: a peer's profile + presence so the reader can decide who to
+ *  ask and tell a working agent apart from a paused/stalled/finished one. */
 function renderAgentProfile(p: {
   id: string;
   name: string | null;
@@ -976,12 +994,21 @@ function renderAgentProfile(p: {
   status: string;
   runtime: string;
   origin: string;
+  lastSeenAt: number | null;
+  lastActivity: { kind: string; text: string; createdAt: number; channel: string | null } | null;
 }): string {
   const nm = p.name?.trim() || p.task?.trim() || `agent ${p.id.slice(0, 8)}`;
   const lines = [
     `${nm} [${p.status}]  (id=${p.id})`,
     `    runtime: ${p.runtime} · origin: ${p.origin}`,
+    `    last seen: ${agoText(p.lastSeenAt)}`,
   ];
+  if (p.lastActivity) {
+    const a = p.lastActivity;
+    const where = a.channel ? `#${a.channel} ` : '';
+    const snippet = a.text.length > 140 ? `${a.text.slice(0, 140)}…` : a.text;
+    lines.push(`    last activity: [${where}${a.kind}] ${snippet} — ${agoText(a.createdAt)}`);
+  }
   if (p.task && p.task.trim()) lines.push(`    task: ${p.task.trim()}`);
   if (p.about && p.about.trim()) lines.push(`    about: ${p.about.trim()}`);
   return lines.join('\n');
@@ -1236,6 +1263,8 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
           status: string;
           runtime: string;
           origin: string;
+          lastSeenAt: number | null;
+          lastActivity: { kind: string; text: string; createdAt: number; channel: string | null } | null;
         } | null;
       }>(`/api/sessions/${forId}/agent/${encodeURIComponent(agentId)}`);
       return profile;

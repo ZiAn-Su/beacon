@@ -1911,6 +1911,42 @@ export function readChannelDetail(channelId: string, limit = 50, readerId?: stri
   return { channel: { id: c.id, name: c.name }, members, messages };
 }
 
+const selectLastOutboundMessage = db.prepare(
+  `SELECT * FROM messages
+   WHERE (sessionId = ? AND direction = 'agent') OR fromSessionId = ?
+   ORDER BY createdAt DESC LIMIT 1`,
+);
+const selectLastChannelMessageFrom = db.prepare(
+  `SELECT * FROM channel_messages WHERE fromSessionId = ? ORDER BY createdAt DESC LIMIT 1`,
+);
+
+export interface AgentActivity {
+  kind: string;
+  text: string;
+  createdAt: number;
+  channel: string | null; // channel name when the activity was a channel post
+}
+
+/**
+ * The single most recent thing an agent surfaced — its latest 1:1 message to the
+ * human, peer message, or channel post — so an orchestrating agent can tell a
+ * quiet `idle` ("done, paused; last said X 3m ago") apart from a stalled or
+ * never-started one. Picks the more recent across direct messages and channels.
+ */
+export function lastAgentActivity(targetId: string): AgentActivity | null {
+  const direct = selectLastOutboundMessage.get(targetId, targetId) as MessageRow | undefined;
+  const chan = selectLastChannelMessageFrom.get(targetId) as ChannelMessage | undefined;
+  const directAt = direct?.createdAt ?? -1;
+  const chanAt = chan?.createdAt ?? -1;
+  if (directAt < 0 && chanAt < 0) return null;
+  if (chan && chanAt >= directAt) {
+    const c = getChannel(chan.channelId);
+    return { kind: chan.kind, text: chan.text, createdAt: chan.createdAt, channel: c?.name ?? null };
+  }
+  const m = mapMessage(direct!);
+  return { kind: m.kind, text: m.text, createdAt: m.createdAt, channel: null };
+}
+
 export interface AgentProfile {
   id: string;
   name: string | null;
@@ -1919,11 +1955,21 @@ export interface AgentProfile {
   status: SessionStatus;
   runtime: string;
   origin: string;
+  // Presence: when the agent last touched the platform (any API call). Always
+  // included — a timestamp is not sensitive and disambiguates a quiet `idle`.
+  lastSeenAt: number | null;
+  // The agent's most recent surfaced activity. Included only when the viewer is
+  // authorized to contact it, so presence is public but message content is not
+  // leaked to peers that can merely see the agent.
+  lastActivity: AgentActivity | null;
 }
-/** A peer's public profile so an agent can decide who to ask before spending an ask. */
-export function agentProfile(id: string): AgentProfile | undefined {
+/** A peer's public profile so an agent can decide who to ask before spending an
+ *  ask. When `viewerId` is an allow-authorized peer (e.g. an agent it spawned),
+ *  the profile also carries the target's last activity for orchestration. */
+export function agentProfile(id: string, viewerId?: string): AgentProfile | undefined {
   const s = getSession(id);
   if (!s) return undefined;
+  const maySeeActivity = viewerId != null && resolvePeerPermission(viewerId, id) === 'allow';
   return {
     id: s.id,
     name: s.title ?? null,
@@ -1932,6 +1978,8 @@ export function agentProfile(id: string): AgentProfile | undefined {
     status: s.status,
     runtime: s.runtime,
     origin: s.origin,
+    lastSeenAt: s.lastSeenAt,
+    lastActivity: maySeeActivity ? lastAgentActivity(id) : null,
   };
 }
 
