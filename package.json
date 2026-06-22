@@ -14,6 +14,7 @@
     "build:web": "cd web && npm install && npm run build",
     "start": "npm run build:web && npm run platform",
     "update": "git pull && npm install && npm run build:web",
+    "release": "node scripts/release.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:encoding": "node scripts/check-encoding.mjs",
     "verify": "npm run typecheck && npm run check:encoding && npm run build:web"
