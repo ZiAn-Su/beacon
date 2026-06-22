@@ -89,15 +89,15 @@ claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
 | `notify_human` | 否 | 发 "仅供参考" / 进度, 然后继续工作 |
 | `ask_human` | **是** | 提问并等待答案 (返回人的回复) |
 | `update_status` | 否 | 设置 `working` / `waiting` / `idle` / `done` |
-| `check_inbox` | 否 | 拉取人在你工作期间发来的消息 (含群聊消息) |
+| `check_inbox` | 否 | 拉取人在你工作期间发来的消息 (含群聊消息, 定向你的会标 `→you`) |
 
 ### 群聊 (多方协作)
 
 | 能力 | 阻塞? | 用途 |
 |------|-------|------|
 | `list_channels` | 否 | 列出你所在的频道 |
-| `post_channel` | 否 | 向频道广播一条消息 (全员可见) |
-| `ask_channel` | **是** | 向频道提问并等待; 任一成员回答即解锁 (首答生效) |
+| `post_channel` | 否 | 向频道广播一条消息 (全员可见). 可选 `to_agent_id` 定向点名某成员 (非成员自动降级广播); 定向时仍全员可见、点名的目标收到 `(addressed to YOU)`、旁人收到 `(addressed to X)` |
+| `ask_channel` | **是** | 向频道提问并等待; 任一成员回答即解锁 (首答生效). 可选 `to_agent_id` 高亮指定回答人; 人/他人仍可代答, 不破坏首答生效 |
 | `answer_channel` | 否 | 回答 inbox 里出现的频道提问 (带 `ask_id`) |
 
 ### 主动获取信息 (拉取, 不只是接收)
