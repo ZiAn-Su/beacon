@@ -142,21 +142,21 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
     async listChannels(forId) {
       return store.channelsForSession(forId).map((c) => ({ id: c.id, name: c.name }));
     },
-    async postChannel(fromId, channelId, text) {
+    async postChannel(fromId, channelId, text, toSessionId) {
       // Same membership guard the REST south route enforces.
       if (!store.getChannel(channelId)) throw new Error('channel not found');
       if (!store.isParticipant(channelId, fromId)) {
         throw new Error('not a participant of this channel');
       }
-      fanOutChannelMessage(store.postChannelMessage(channelId, fromId, text));
+      fanOutChannelMessage(store.postChannelMessage(channelId, fromId, text, { toSessionId: toSessionId ?? null }));
     },
-    async askChannel(fromId, channelId, question, options) {
+    async askChannel(fromId, channelId, question, options, toSessionId) {
       if (!store.getChannel(channelId)) throw new Error('channel not found');
       // createChannelAsk re-checks membership; surface a clean error first.
       if (!store.isParticipant(channelId, fromId)) {
         throw new Error('not a participant of this channel');
       }
-      const { ask, message } = store.createChannelAsk(channelId, fromId, question, options ?? null);
+      const { ask, message } = store.createChannelAsk(channelId, fromId, question, options ?? null, toSessionId ?? null);
       fanOutChannelMessage(message);
       return { askId: ask.id };
     },

@@ -82,7 +82,7 @@ interface StoreState {
   deleteChannel: (channelId: string) => Promise<void>;
   addChannelMember: (channelId: string, sessionId: string) => Promise<void>;
   removeChannelMember: (channelId: string, sessionId: string) => Promise<void>;
-  postToChannel: (channelId: string, text: string) => Promise<void>;
+  postToChannel: (channelId: string, text: string, toSessionId?: string | null) => Promise<void>;
   answerChannelAsk: (channelId: string, askId: string, text: string) => Promise<void>;
 }
 
@@ -486,10 +486,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const postToChannel = useCallback(
-    async (channelId: string, text: string) => {
+    async (channelId: string, text: string, toSessionId?: string | null) => {
       const trimmed = text.trim();
       if (!trimmed) return;
-      appendChannelMessage(channelId, await postChannelMessageApi(channelId, trimmed));
+      appendChannelMessage(channelId, await postChannelMessageApi(channelId, trimmed, toSessionId));
     },
     [appendChannelMessage],
   );

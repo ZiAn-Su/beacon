@@ -95,6 +95,8 @@ export interface ChannelMessage {
   // for forward-compat (older payloads default to 'chat').
   kind?: ChannelMsgKind;
   askId?: string | null;
+  // @directed target member id, or null/undefined for a plain broadcast.
+  toSessionId?: string | null;
   createdAt: number;
 }
 

@@ -62,12 +62,13 @@ export interface AgentOps {
   // Group channels: a channel fans a message out to all its members (other
   // agents + the human guardian). v1 is broadcast chat; v2 adds blocking asks.
   listChannels(forId: string): Promise<{ id: string; name: string }[]>;
-  postChannel(fromId: string, channelId: string, text: string): Promise<void>;
+  postChannel(fromId: string, channelId: string, text: string, toSessionId?: string | null): Promise<void>;
   askChannel(
     fromId: string,
     channelId: string,
     question: string,
     options?: string[] | null,
+    toSessionId?: string | null,
   ): Promise<{ askId: string }>;
   answerChannel(
     fromId: string,
@@ -86,6 +87,7 @@ export interface AgentOps {
       text: string;
       kind: 'chat' | 'ask' | 'answer';
       askId: string | null;
+      toSessionId: string | null;
       createdAt: number;
     }[]
   >;
@@ -336,7 +338,7 @@ export function registerBeaconTools(
       ]);
       const items: { createdAt: number; line: string }[] = [
         ...direct.map((m) => ({ createdAt: m.createdAt, line: renderInboxLine(m) })),
-        ...channel.map((m) => ({ createdAt: m.createdAt, line: renderChannelLine(m) })),
+        ...channel.map((m) => ({ createdAt: m.createdAt, line: renderChannelLine(m, id) })),
       ];
       items.sort((a, b) => a.createdAt - b.createdAt);
       if (items.length) lastInboxTs = items[items.length - 1].createdAt;
@@ -578,16 +580,21 @@ export function registerBeaconTools(
       title: 'Post a message to a group channel',
       description:
         'Broadcast a message to a channel (group) you belong to. Everyone in it — other agents ' +
-        'and the human guardian — sees it. Use channel_id from list_channels.',
+        'and the human guardian — sees it. Use channel_id from list_channels. Optionally address ' +
+        'it at one member with to_agent_id (it stays visible to all; they are flagged as the target).',
       inputSchema: {
         channel_id: z.string().describe('Target channel id (from list_channels)'),
         message: z.string().describe('The message to broadcast to the channel'),
+        to_agent_id: z
+          .string()
+          .optional()
+          .describe('Optional: address this message at one member (still seen by all)'),
       },
     },
-    async ({ channel_id, message }) => {
+    async ({ channel_id, message, to_agent_id }) => {
       const id = await ensure();
       try {
-        await ops.postChannel(id, channel_id, message);
+        await ops.postChannel(id, channel_id, message, to_agent_id ?? null);
       } catch (e) {
         return {
           content: [
@@ -614,13 +621,17 @@ export function registerBeaconTools(
           .array(z.string())
           .optional()
           .describe('Optional quick-reply choices a member can pick'),
+        to_agent_id: z
+          .string()
+          .optional()
+          .describe('Optional: direct the question at one member (any member may still answer)'),
       },
     },
-    async ({ channel_id, question, options }) => {
+    async ({ channel_id, question, options, to_agent_id }) => {
       const id = await ensure();
       let askId: string;
       try {
-        ({ askId } = await ops.askChannel(id, channel_id, question, options));
+        ({ askId } = await ops.askChannel(id, channel_id, question, options, to_agent_id ?? null));
       } catch (e) {
         return {
           content: [
@@ -793,18 +804,27 @@ function renderInboxLine(m: {
  * who posted (a peer agent, or the human guardian) so group traffic is distinct
  * from 1:1 chat in the same inbox view.
  */
-function renderChannelLine(m: {
-  channelId: string;
-  channelName: string;
-  fromSessionId: string | null;
-  text: string;
-  kind: 'chat' | 'ask' | 'answer';
-  askId: string | null;
-}): string {
+function renderChannelLine(
+  m: {
+    channelId: string;
+    channelName: string;
+    fromSessionId: string | null;
+    text: string;
+    kind: 'chat' | 'ask' | 'answer';
+    askId: string | null;
+    toSessionId?: string | null;
+  },
+  selfId?: string,
+): string {
   const who = m.fromSessionId ? `agent ${m.fromSessionId}` : 'guardian';
+  const addressed = m.toSessionId
+    ? m.toSessionId === selfId
+      ? ' →you'
+      : ` →agent ${m.toSessionId.slice(0, 8)}`
+    : '';
   if (m.kind === 'ask' && m.askId) {
     return (
-      `[#${m.channelName} · ${who} ASKS] ${m.text}  ` +
+      `[#${m.channelName} · ${who} ASKS${addressed}] ${m.text}  ` +
       `(answer with answer_channel channel_id=${m.channelId} ask_id=${m.askId})`
     );
   }
@@ -812,7 +832,7 @@ function renderChannelLine(m: {
     return `[#${m.channelName} · ${who} answered] ${m.text}`;
   }
   return (
-    `[#${m.channelName} · ${who}] ${m.text}  ` +
+    `[#${m.channelName} · ${who}${addressed}] ${m.text}  ` +
     `(reply to the group with post_channel channel_id=${m.channelId})`
   );
 }
@@ -1051,16 +1071,16 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
       );
       return channels.map((c) => ({ id: c.id, name: c.name }));
     },
-    async postChannel(fromId, channelId, text) {
+    async postChannel(fromId, channelId, text, toSessionId) {
       await api(`/api/sessions/${fromId}/channel-post`, {
         method: 'POST',
-        body: JSON.stringify({ channelId, text }),
+        body: JSON.stringify({ channelId, text, toSessionId: toSessionId ?? undefined }),
       });
     },
-    async askChannel(fromId, channelId, question, options) {
+    async askChannel(fromId, channelId, question, options, toSessionId) {
       const { askId } = await api<{ askId: string }>(`/api/sessions/${fromId}/channel-ask`, {
         method: 'POST',
-        body: JSON.stringify({ channelId, question, options: options ?? undefined }),
+        body: JSON.stringify({ channelId, question, options: options ?? undefined, toSessionId: toSessionId ?? undefined }),
       });
       return { askId };
     },
@@ -1079,6 +1099,7 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
           text: string;
           kind: 'chat' | 'ask' | 'answer';
           askId: string | null;
+          toSessionId: string | null;
           createdAt: number;
         }[];
       }>(`/api/sessions/${id}/channel-inbox?after=${after}`);

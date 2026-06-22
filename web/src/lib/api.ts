@@ -466,15 +466,16 @@ export async function removeChannelParticipant(
   return (await json<{ participants: string[] }>(r)).participants;
 }
 
-/** Owner posts to a channel (fromSessionId null). */
+/** Owner posts to a channel (fromSessionId null). Optionally @directed at one member. */
 export async function postChannelMessage(
   channelId: string,
   text: string,
+  toSessionId?: string | null,
 ): Promise<ChannelMessage> {
   const r = await fetch(`/api/channels/${encodeURIComponent(channelId)}/messages`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, toSessionId: toSessionId ?? undefined }),
   });
   return (await json<{ message: ChannelMessage }>(r)).message;
 }

@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArrowUp,
+  AtSign,
   Check,
   CheckCheck,
   Clock,
@@ -296,11 +297,12 @@ function ChannelThread({
     text: string;
     kind?: ChannelMsgKind;
     askId?: string | null;
+    toSessionId?: string | null;
     createdAt: number;
   }[];
   states: ChannelMemberState[];
   onBack: () => void;
-  onPost: (channelId: string, text: string) => Promise<void>;
+  onPost: (channelId: string, text: string, toSessionId?: string | null) => Promise<void>;
   onAnswer: (channelId: string, askId: string, text: string) => Promise<void>;
   onAddMember: (channelId: string, sessionId: string) => Promise<void>;
   onRemoveMember: (channelId: string, sessionId: string) => Promise<void>;
@@ -313,6 +315,9 @@ function ChannelThread({
   const [confirmDelete, setConfirmDelete] = useState(false);
   // When set, the composer answers this pending channel ask instead of chatting.
   const [answering, setAnswering] = useState<{ askId: string; question: string } | null>(null);
+  // When set, the next post is @directed at this member (still broadcast to all).
+  const [target, setTarget] = useState<string | null>(null);
+  const [targetMenuOpen, setTargetMenuOpen] = useState(false);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -356,13 +361,14 @@ function ChannelThread({
         await onAnswer(channelId, answering.askId, text);
         setAnswering(null);
       } else {
-        await onPost(channelId, text);
+        await onPost(channelId, text, target);
+        setTarget(null);
       }
       setValue("");
     } finally {
       setSending(false);
     }
-  }, [value, sending, onPost, onAnswer, answering, channelId]);
+  }, [value, sending, onPost, onAnswer, answering, channelId, target]);
 
   const onKeyDown = (e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -551,6 +557,15 @@ function ChannelThread({
                       <span className="font-medium" style={{ color: "var(--text-secondary)" }}>
                         {who}
                       </span>
+                      {m.toSessionId && (
+                        <span
+                          className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[10px] font-medium"
+                          style={{ background: "var(--surface-hover)", color: "var(--accent)", border: "1px solid var(--accent-soft)" }}
+                        >
+                          <AtSign size={9} />
+                          {nameFor(m.toSessionId)}
+                        </span>
+                      )}
                       <span>{rel(m.createdAt, now)}</span>
                     </div>
                     <div
@@ -646,6 +661,25 @@ function ChannelThread({
               </button>
             </div>
           )}
+          {target && !answering && (
+            <div
+              className="mb-2 flex items-center gap-2 rounded-xl px-3 py-2"
+              style={{ background: "var(--accent-soft)", border: "1px solid var(--accent-soft)" }}
+            >
+              <AtSign size={13} style={{ color: "var(--accent)" }} />
+              <div className="min-w-0 flex-1 truncate text-[12px]" style={{ color: "var(--text-secondary)" }}>
+                {t("channels.directedTo", { name: nameFor(target) })}
+              </div>
+              <button
+                onClick={() => setTarget(null)}
+                aria-label={t("channels.create.cancel")}
+                className="flex h-6 w-6 items-center justify-center rounded-md"
+                style={{ color: "var(--text-muted)" }}
+              >
+                <X size={13} />
+              </button>
+            </div>
+          )}
           <div
             className="relative flex items-end gap-2 rounded-2xl px-3 py-2"
             style={{
@@ -654,6 +688,30 @@ function ChannelThread({
               boxShadow: "var(--shadow-1)",
             }}
           >
+            {!answering && participants.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setTargetMenuOpen((v) => !v)}
+                  aria-label={t("channels.directTo")}
+                  title={t("channels.directTo")}
+                  className="mb-0.5 flex h-9 w-9 items-center justify-center rounded-xl transition-colors"
+                  style={{ color: target ? "var(--accent)" : "var(--text-muted)" }}
+                >
+                  <AtSign size={17} />
+                </button>
+                {targetMenuOpen && (
+                  <TargetMenu
+                    participants={participants}
+                    nameFor={nameFor}
+                    onPick={(id) => {
+                      setTarget(id);
+                      setTargetMenuOpen(false);
+                    }}
+                    onClose={() => setTargetMenuOpen(false)}
+                  />
+                )}
+              </div>
+            )}
             <textarea
               ref={taRef}
               value={value}
@@ -771,6 +829,58 @@ function ChannelReceipts({
           total: recipients.length,
         })}
       </span>
+    </div>
+  );
+}
+
+// Popover to pick one member to @direct the next message at. The message still
+// broadcasts to the whole channel; the target is just flagged.
+function TargetMenu({
+  participants,
+  nameFor,
+  onPick,
+  onClose,
+}: {
+  participants: string[];
+  nameFor: (id: string) => string;
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [onClose]);
+  return (
+    <div
+      ref={ref}
+      className="absolute bottom-11 left-0 z-30 w-[220px] overflow-hidden rounded-xl"
+      style={{ background: "var(--surface-card)", border: "1px solid var(--border)", boxShadow: "var(--shadow-2)" }}
+    >
+      <div className="scroll-area max-h-[260px] overflow-y-auto p-1.5">
+        <div
+          className="px-2 py-1 text-[10.5px] font-semibold uppercase tracking-wider"
+          style={{ color: "var(--text-muted)" }}
+        >
+          {t("channels.directTo")}
+        </div>
+        {participants.map((id) => (
+          <button
+            key={id}
+            onClick={() => onPick(id)}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors"
+            onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+          >
+            <Avatar id={id} label={nameFor(id)} size={22} />
+            <span className="min-w-0 flex-1 truncate text-[12.5px]">{nameFor(id)}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

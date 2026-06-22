@@ -181,6 +181,9 @@ ensureColumn('sessions', 'description', 'TEXT');
 // 'chat' with no ask.
 ensureColumn('channel_messages', 'kind', "TEXT NOT NULL DEFAULT 'chat'");
 ensureColumn('channel_messages', 'askId', 'TEXT');
+// @directed channel messages: an optional target member the message is addressed
+// at (still broadcast to all). NULL on old rows / plain broadcasts.
+ensureColumn('channel_messages', 'toSessionId', 'TEXT');
 // Admission timestamp. NULL means "pending the owner's decision" (quarantined).
 // When this column is first added, existing rows predate admission and must be
 // treated as already admitted, so backfill them once at migration time —
@@ -1508,8 +1511,8 @@ const deleteParticipantsForSession = db.prepare(
   `DELETE FROM channel_participants WHERE sessionId = ?`,
 );
 const insertChannelMessage = db.prepare(
-  `INSERT INTO channel_messages (id, channelId, fromSessionId, text, kind, askId, createdAt)
-   VALUES (@id, @channelId, @fromSessionId, @text, @kind, @askId, @createdAt)`,
+  `INSERT INTO channel_messages (id, channelId, fromSessionId, text, kind, askId, toSessionId, createdAt)
+   VALUES (@id, @channelId, @fromSessionId, @text, @kind, @askId, @toSessionId, @createdAt)`,
 );
 const selectChannelMessages = db.prepare(
   `SELECT * FROM channel_messages WHERE channelId = ? ORDER BY createdAt ASC`,
@@ -1624,9 +1627,11 @@ export function postChannelMessage(
   channelId: string,
   fromSessionId: string | null,
   text: string,
-  opts?: { kind?: ChannelMsgKind; askId?: string | null },
+  opts?: { kind?: ChannelMsgKind; askId?: string | null; toSessionId?: string | null },
 ): ChannelMessage {
   if (!getChannel(channelId)) throw new Error('channel not found');
+  // A @directed target must itself be a member of the channel; ignore otherwise.
+  const to = opts?.toSessionId && isParticipant(channelId, opts.toSessionId) ? opts.toSessionId : null;
   const m: ChannelMessage = {
     id: randomUUID(),
     channelId,
@@ -1634,6 +1639,7 @@ export function postChannelMessage(
     text,
     kind: opts?.kind ?? 'chat',
     askId: opts?.askId ?? null,
+    toSessionId: to,
     createdAt: now(),
   };
   insertChannelMessage.run(m);
@@ -1652,6 +1658,7 @@ export function createChannelAsk(
   fromSessionId: string,
   question: string,
   options: string[] | null,
+  toSessionId?: string | null,
 ): { ask: Ask; message: ChannelMessage } {
   if (!getChannel(channelId)) throw new Error('channel not found');
   if (!isParticipant(channelId, fromSessionId)) throw new Error('not a participant of this channel');
@@ -1667,7 +1674,11 @@ export function createChannelAsk(
   };
   insertAsk.run({ ...ask, options: ask.options ? JSON.stringify(ask.options) : null });
   setStatus(fromSessionId, 'waiting');
-  const message = postChannelMessage(channelId, fromSessionId, question, { kind: 'ask', askId: ask.id });
+  const message = postChannelMessage(channelId, fromSessionId, question, {
+    kind: 'ask',
+    askId: ask.id,
+    toSessionId: toSessionId ?? null,
+  });
   return { ask, message };
 }
 
@@ -1712,6 +1723,7 @@ export interface ChannelInboxItem {
   text: string;
   kind: ChannelMsgKind;
   askId: string | null;
+  toSessionId: string | null;
   createdAt: number;
 }
 
@@ -1729,6 +1741,7 @@ export function channelInbox(sessionId: string, after: number): ChannelInboxItem
           text: m.text,
           kind: m.kind,
           askId: m.askId,
+          toSessionId: m.toSessionId,
           createdAt: m.createdAt,
         });
         touched.add(c.id);
@@ -1784,6 +1797,7 @@ export interface ChannelHistoryItem {
   text: string;
   kind: ChannelMsgKind;
   askId: string | null;
+  toSessionId: string | null;
   createdAt: number;
 }
 export interface ChannelDetail {
@@ -1819,6 +1833,7 @@ export function readChannelDetail(channelId: string, limit = 50, readerId?: stri
       text: m.text,
       kind: m.kind,
       askId: m.askId,
+      toSessionId: m.toSessionId,
       createdAt: m.createdAt,
     }));
   return { channel: { id: c.id, name: c.name }, members, messages };

@@ -64,15 +64,20 @@ const renderInboxLine = (m) => {
 // A channel message in the merged inbox: tagged with the channel and who posted
 // (a peer agent, or the human guardian). Asks/answers are flagged so the agent
 // knows a group question is waiting and how to answer it.
-const renderChannelLine = (m) => {
+const renderChannelLine = (m, selfId) => {
   const who = m.fromSessionId ? `agent ${m.fromSessionId}` : 'guardian';
+  const addressed = m.toSessionId
+    ? m.toSessionId === selfId
+      ? ' →you'
+      : ` →agent ${String(m.toSessionId).slice(0, 8)}`
+    : '';
   if (m.kind === 'ask' && m.askId) {
-    return `[#${m.channelName} · ${who} ASKS] ${m.text}  (answer with answer-channel ${m.channelId} ${m.askId} <text>)`;
+    return `[#${m.channelName} · ${who} ASKS${addressed}] ${m.text}  (answer with answer-channel ${m.channelId} ${m.askId} <text>)`;
   }
   if (m.kind === 'answer') {
     return `[#${m.channelName} · ${who} answered] ${m.text}`;
   }
-  return `[#${m.channelName} · ${who}] ${m.text}`;
+  return `[#${m.channelName} · ${who}${addressed}] ${m.text}`;
 };
 
 async function api(path, body) {
@@ -157,7 +162,7 @@ try {
     ]);
     const items = [
       ...messages.map((m) => ({ createdAt: m.createdAt, line: renderInboxLine(m) })),
-      ...chan.map((m) => ({ createdAt: m.createdAt, line: renderChannelLine(m) })),
+      ...chan.map((m) => ({ createdAt: m.createdAt, line: renderChannelLine(m, id) })),
     ].sort((a, b) => a.createdAt - b.createdAt);
     if (items.length) {
       c.sessionId = id;

@@ -158,5 +158,9 @@ export interface ChannelMessage {
   text: string;
   kind: ChannelMsgKind;
   askId: string | null;
+  // Optional @directed target: when set, this message is addressed at one member
+  // (still visible to everyone — the human is always in the room). null = a plain
+  // broadcast to the whole channel.
+  toSessionId: string | null;
   createdAt: number;
 }

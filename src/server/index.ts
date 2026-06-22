@@ -851,7 +851,8 @@ app.post('/api/channels/:id/messages', (req: Request, res: Response) => {
   if (!store.getChannel(id)) return channelNotFound(res);
   const text = String(req.body?.text ?? '');
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
-  const message = store.postChannelMessage(id, null, text);
+  const toSessionId = req.body?.toSessionId ? String(req.body.toSessionId) : null;
+  const message = store.postChannelMessage(id, null, text, { toSessionId });
   fanOutChannelMessage(message);
   ok(res, { message });
 });
@@ -891,8 +892,9 @@ app.post('/api/sessions/:id/channel-post', (req: Request, res: Response) => {
     res.status(403).json({ error: 'not a participant of this channel' }); return;
   }
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
+  const toSessionId = req.body?.toSessionId ? String(req.body.toSessionId) : null;
   store.touchSeen(id);
-  const message = store.postChannelMessage(channelId, id, text);
+  const message = store.postChannelMessage(channelId, id, text, { toSessionId });
   fanOutChannelMessage(message);
   ok(res, { message });
 });
@@ -912,8 +914,9 @@ app.post('/api/sessions/:id/channel-ask', (req: Request, res: Response) => {
     res.status(403).json({ error: 'not a participant of this channel' }); return;
   }
   if (!question.trim()) { res.status(400).json({ error: 'question is required' }); return; }
+  const toSessionId = req.body?.toSessionId ? String(req.body.toSessionId) : null;
   store.touchSeen(id);
-  const { ask, message } = store.createChannelAsk(channelId, id, question, options);
+  const { ask, message } = store.createChannelAsk(channelId, id, question, options, toSessionId);
   fanOutChannelMessage(message);
   ok(res, { askId: ask.id });
 });

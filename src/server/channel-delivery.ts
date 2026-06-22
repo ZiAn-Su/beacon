@@ -18,18 +18,31 @@ function senderName(fromSessionId: string | null): string {
   return s.title || s.task || `agent ${fromSessionId.slice(0, 8)}`;
 }
 
-function channelDeliveryLine(m: {
-  channelId: string;
-  channelName: string;
-  fromSessionId: string | null;
-  kind: 'chat' | 'ask' | 'answer';
-  askId: string | null;
-  text: string;
-}): string {
+function channelDeliveryLine(
+  m: {
+    channelId: string;
+    channelName: string;
+    fromSessionId: string | null;
+    kind: 'chat' | 'ask' | 'answer';
+    askId: string | null;
+    toSessionId: string | null;
+    text: string;
+  },
+  recipientId: string,
+): string {
   const who = senderName(m.fromSessionId);
+  // @directed framing: the addressed member is told it's for them; everyone else
+  // sees it's aimed at that member (still broadcast — the room stays transparent).
+  let addressed = '';
+  if (m.toSessionId) {
+    addressed =
+      m.toSessionId === recipientId
+        ? ' (addressed to YOU)'
+        : ` (addressed to ${senderName(m.toSessionId)})`;
+  }
   if (m.kind === 'ask' && m.askId) {
     return (
-      `[Beacon channel #${m.channelName} | ${who} ASKS] ${m.text} ` +
+      `[Beacon channel #${m.channelName} | ${who} ASKS${addressed}] ${m.text} ` +
       `(answer the group with the answer_channel tool: channel_id=${m.channelId} ask_id=${m.askId})`
     );
   }
@@ -37,7 +50,7 @@ function channelDeliveryLine(m: {
     return `[Beacon channel #${m.channelName} | ${who} answered] ${m.text}`;
   }
   return (
-    `[Beacon channel #${m.channelName} | ${who}] ${m.text} ` +
+    `[Beacon channel #${m.channelName} | ${who}${addressed}] ${m.text} ` +
     `(reply to the group with the post_channel tool: channel_id=${m.channelId} — this is a group channel, not a 1:1)`
   );
 }
@@ -46,16 +59,20 @@ function channelDeliveryLine(m: {
 export function fanOutChannelMessage(m: ChannelMessage): void {
   const channel = store.getChannel(m.channelId);
   if (!channel) return;
-  const line = channelDeliveryLine({
-    channelId: m.channelId,
-    channelName: channel.name,
-    fromSessionId: m.fromSessionId,
-    kind: m.kind,
-    askId: m.askId,
-    text: m.text,
-  });
   for (const pid of store.listParticipants(m.channelId)) {
     if (pid === m.fromSessionId) continue;
+    const line = channelDeliveryLine(
+      {
+        channelId: m.channelId,
+        channelName: channel.name,
+        fromSessionId: m.fromSessionId,
+        kind: m.kind,
+        askId: m.askId,
+        toSessionId: m.toSessionId,
+        text: m.text,
+      },
+      pid,
+    );
     // writeToPty spawns an idle agent on demand; true means it reached a live
     // terminal — record that as a delivery receipt (false for non-agent runtimes).
     if (writeToPty(pid, line)) store.markChannelDelivered(m.channelId, pid);
