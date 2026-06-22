@@ -98,6 +98,14 @@ export interface ChannelMessage {
   createdAt: number;
 }
 
+// Per-member receipts for a channel: how far each agent member has been
+// delivered (typed into its live terminal) and read (it pulled the channel).
+export interface ChannelMemberState {
+  sessionId: string;
+  deliveredAt: number | null;
+  readAt: number | null;
+}
+
 export type WsEvent =
   | { type: "hello"; sessions: Session[] }
   | { type: "session"; session: Session }
@@ -105,4 +113,5 @@ export type WsEvent =
   | { type: "message"; message: Message }
   | { type: "channel"; channel: Channel }
   | { type: "channel-removed"; id: string }
-  | { type: "channel-message"; message: ChannelMessage };
+  | { type: "channel-message"; message: ChannelMessage }
+  | { type: "channel-state"; channelId: string; states: ChannelMemberState[] };

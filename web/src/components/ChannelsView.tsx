@@ -9,6 +9,9 @@ import {
 } from "react";
 import {
   ArrowUp,
+  Check,
+  CheckCheck,
+  Clock,
   Hash,
   HelpCircle,
   Plus,
@@ -16,7 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import type { ChannelMsgKind, Session } from "../types";
+import type { ChannelMemberState, ChannelMsgKind, Session } from "../types";
 import { useStore } from "../lib/store";
 import { useI18n } from "../lib/i18n";
 import { isOnline } from "../lib/format";
@@ -49,6 +52,7 @@ export function ChannelsView({ sessions, now, targetChannelId, onTargetConsumed 
     channels,
     channelMessages,
     channelParticipants,
+    channelStates,
     ensureChannelDetail,
     createChannel,
     deleteChannel,
@@ -230,6 +234,7 @@ export function ChannelsView({ sessions, now, targetChannelId, onTargetConsumed 
             sessionById={sessionById}
             participants={channelParticipants[selected.id] ?? []}
             messages={channelMessages[selected.id] ?? []}
+            states={channelStates[selected.id] ?? []}
             onBack={() => setMobileThread(false)}
             onPost={postToChannel}
             onAnswer={answerChannelAsk}
@@ -271,6 +276,7 @@ function ChannelThread({
   sessionById,
   participants,
   messages,
+  states,
   onBack,
   onPost,
   onAnswer,
@@ -292,6 +298,7 @@ function ChannelThread({
     askId?: string | null;
     createdAt: number;
   }[];
+  states: ChannelMemberState[];
   onBack: () => void;
   onPost: (channelId: string, text: string) => Promise<void>;
   onAnswer: (channelId: string, askId: string, text: string) => Promise<void>;
@@ -595,6 +602,14 @@ function ChannelThread({
               );
             })
           )}
+          {messages.length > 0 && (
+            <ChannelReceipts
+              lastMessage={messages[messages.length - 1]!}
+              participants={participants}
+              states={states}
+              nameFor={nameFor}
+            />
+          )}
         </div>
       </div>
 
@@ -681,6 +696,81 @@ function ChannelThread({
           }}
         />
       )}
+    </div>
+  );
+}
+
+// Two-tier read receipts for the latest message: which agent members it was
+// delivered to (typed into their live terminal) and which have read it (pulled
+// the channel). The poster is excluded. Owner posts show all agents.
+function ChannelReceipts({
+  lastMessage,
+  participants,
+  states,
+  nameFor,
+}: {
+  lastMessage: { fromSessionId: string | null; createdAt: number };
+  participants: string[];
+  states: ChannelMemberState[];
+  nameFor: (id: string) => string;
+}) {
+  const { t } = useI18n();
+  const recipients = participants.filter((id) => id !== lastMessage.fromSessionId);
+  if (recipients.length === 0) return null;
+  const ts = lastMessage.createdAt;
+  const stateOf = (id: string): "read" | "delivered" | "pending" => {
+    const s = states.find((x) => x.sessionId === id);
+    if (s?.readAt != null && s.readAt >= ts) return "read";
+    if (s?.deliveredAt != null && s.deliveredAt >= ts) return "delivered";
+    return "pending";
+  };
+  const readN = recipients.filter((id) => stateOf(id) === "read").length;
+  const deliveredN = recipients.filter((id) => stateOf(id) !== "pending").length;
+  return (
+    <div
+      className="flex items-center justify-end gap-2 pr-1 pt-0.5 text-[10.5px]"
+      style={{ color: "var(--text-muted)" }}
+    >
+      <div className="flex items-center">
+        {recipients.map((id, i) => {
+          const st = stateOf(id);
+          const color =
+            st === "read"
+              ? "var(--accent)"
+              : st === "delivered"
+                ? "var(--text-secondary)"
+                : "var(--text-muted)";
+          return (
+            <span
+              key={id}
+              className="relative"
+              style={{ marginLeft: i === 0 ? 0 : -6 }}
+              title={`${nameFor(id)} · ${t(`channels.receipt.${st}`)}`}
+            >
+              <Avatar id={id} label={nameFor(id)} size={18} ring />
+              <span
+                className="absolute -bottom-1 -right-1 flex h-3 w-3 items-center justify-center rounded-full"
+                style={{ background: "var(--bg)", color }}
+              >
+                {st === "read" ? (
+                  <CheckCheck size={9} />
+                ) : st === "delivered" ? (
+                  <Check size={9} />
+                ) : (
+                  <Clock size={8} />
+                )}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      <span>
+        {t("channels.receiptSummary", {
+          read: readN,
+          delivered: deliveredN,
+          total: recipients.length,
+        })}
+      </span>
     </div>
   );
 }

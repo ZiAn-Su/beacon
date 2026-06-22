@@ -1,4 +1,4 @@
-import type { Attachment, Channel, ChannelMessage, Message, Session } from "../types";
+import type { Attachment, Channel, ChannelMemberState, ChannelMessage, Message, Session } from "../types";
 
 // Typed wrappers for the north-side REST contract. In dev Vite proxies
 // `/api` -> http://127.0.0.1:4319, so we just use relative URLs.
@@ -407,6 +407,7 @@ export interface ChannelDetail {
   channel: Channel;
   participants: string[];
   messages: ChannelMessage[];
+  states?: ChannelMemberState[];
 }
 
 export async function getChannel(id: string): Promise<ChannelDetail> {

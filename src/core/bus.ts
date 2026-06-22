@@ -11,6 +11,10 @@ type Events = {
   channel: (c: Channel) => void;
   channelRemoved: (id: string) => void;
   channelMessage: (m: ChannelMessage) => void;
+  channelState: (e: {
+    channelId: string;
+    states: { sessionId: string; deliveredAt: number | null; readAt: number | null }[];
+  }) => void;
 };
 
 class TypedBus extends EventEmitter {

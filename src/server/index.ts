@@ -800,7 +800,12 @@ app.get('/api/channels/:id', (req: Request, res: Response) => {
   const id = param(req, 'id');
   const channel = store.getChannel(id);
   if (!channel) return channelNotFound(res);
-  ok(res, { channel, participants: store.listParticipants(id), messages: store.channelMessages(id) });
+  ok(res, {
+    channel,
+    participants: store.listParticipants(id),
+    messages: store.channelMessages(id),
+    states: store.channelMemberStates(id),
+  });
 });
 
 app.patch('/api/channels/:id', (req: Request, res: Response) => {
@@ -964,7 +969,7 @@ app.get('/api/sessions/:id/read-channel', (req: Request, res: Response) => {
     res.status(403).json({ error: 'not a participant of this channel' }); return;
   }
   const limit = Number(req.query.limit ?? 50) || 50;
-  ok(res, { detail: store.readChannelDetail(channelId, limit) });
+  ok(res, { detail: store.readChannelDetail(channelId, limit, id) });
 });
 
 // A peer agent's public profile (name, about, status) — decide who to ask.
@@ -1153,6 +1158,7 @@ bus.on('sessionRemoved', (id) => broadcast({ type: 'session-removed', id }));
 bus.on('channel', (channel) => broadcast({ type: 'channel', channel }));
 bus.on('channelRemoved', (id) => broadcast({ type: 'channel-removed', id }));
 bus.on('channelMessage', (message) => broadcast({ type: 'channel-message', message }));
+bus.on('channelState', (e) => broadcast({ type: 'channel-state', channelId: e.channelId, states: e.states }));
 
 server.requestTimeout = 0; // allow long-poll /wait without being killed
 server.listen(PORT, () => {

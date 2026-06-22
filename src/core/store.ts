@@ -142,6 +142,16 @@ CREATE TABLE IF NOT EXISTS channel_messages (
   createdAt INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cm_channel ON channel_messages(channelId, createdAt);
+-- Per-member receipts: how far each agent member has been DELIVERED (a channel
+-- message was typed into its live terminal) and READ (it pulled the channel via
+-- check_inbox / read_channel). Two-tier so the owner can see who got vs who saw.
+CREATE TABLE IF NOT EXISTS channel_member_state (
+  channelId TEXT NOT NULL,
+  sessionId TEXT NOT NULL,
+  deliveredAt INTEGER,
+  readAt INTEGER,
+  PRIMARY KEY (channelId, sessionId)
+);
 `);
 
 // Additive migrations: bring older databases (created before a column existed)
@@ -623,6 +633,7 @@ export function deleteSession(id: string): boolean {
     deleteAgentPoliciesFor.run(id);
     deleteAdmissionsFor.run(id);
     deleteParticipantsForSession.run(id);
+    deleteChannelStateForSession.run(id);
     deleteSessionRow.run(id);
   });
   tx();
@@ -1506,6 +1517,31 @@ const selectChannelMessages = db.prepare(
 const deleteChannelMessages = db.prepare(
   `DELETE FROM channel_messages WHERE channelId = ?`,
 );
+const upsertChannelDelivered = db.prepare(
+  `INSERT INTO channel_member_state (channelId, sessionId, deliveredAt, readAt)
+   VALUES (@channelId, @sessionId, @at, NULL)
+   ON CONFLICT(channelId, sessionId) DO UPDATE SET
+     deliveredAt = MAX(COALESCE(deliveredAt, 0), @at)`,
+);
+const upsertChannelRead = db.prepare(
+  `INSERT INTO channel_member_state (channelId, sessionId, deliveredAt, readAt)
+   VALUES (@channelId, @sessionId, @at, @at)
+   ON CONFLICT(channelId, sessionId) DO UPDATE SET
+     deliveredAt = MAX(COALESCE(deliveredAt, 0), @at),
+     readAt = MAX(COALESCE(readAt, 0), @at)`,
+);
+const selectChannelMemberState = db.prepare(
+  `SELECT sessionId, deliveredAt, readAt FROM channel_member_state WHERE channelId = ?`,
+);
+const deleteChannelStateForChannel = db.prepare(
+  `DELETE FROM channel_member_state WHERE channelId = ?`,
+);
+const deleteChannelStateForSession = db.prepare(
+  `DELETE FROM channel_member_state WHERE sessionId = ?`,
+);
+const deleteChannelStatePair = db.prepare(
+  `DELETE FROM channel_member_state WHERE channelId = ? AND sessionId = ?`,
+);
 
 export function createChannel(name: string): Channel {
   const c: Channel = { id: randomUUID(), name: name.trim() || 'channel', createdAt: now() };
@@ -1537,6 +1573,7 @@ export function deleteChannel(id: string): boolean {
   const tx = db.transaction(() => {
     deleteChannelMessages.run(id);
     deleteParticipantsForChannel.run(id);
+    deleteChannelStateForChannel.run(id);
     deleteChannelRow.run(id);
   });
   tx();
@@ -1557,6 +1594,7 @@ export function removeParticipant(channelId: string, sessionId: string): Channel
   const c = getChannel(channelId);
   if (!c) return undefined;
   deleteParticipant.run(channelId, sessionId);
+  deleteChannelStatePair.run(channelId, sessionId);
   bus.emit('channel', c);
   return c;
 }
@@ -1680,6 +1718,7 @@ export interface ChannelInboxItem {
 export function channelInbox(sessionId: string, after: number): ChannelInboxItem[] {
   const channels = channelsForSession(sessionId);
   const out: ChannelInboxItem[] = [];
+  const touched = new Set<string>();
   for (const c of channels) {
     for (const m of channelMessages(c.id)) {
       if (m.createdAt > after && m.fromSessionId !== sessionId) {
@@ -1692,10 +1731,39 @@ export function channelInbox(sessionId: string, after: number): ChannelInboxItem
           askId: m.askId,
           createdAt: m.createdAt,
         });
+        touched.add(c.id);
       }
     }
   }
+  // Pulling a channel's new traffic is an acknowledgement — advance the reader's
+  // read receipt for every channel that produced something this poll.
+  for (const channelId of touched) markChannelRead(channelId, sessionId);
   return out.sort((a, b) => a.createdAt - b.createdAt);
+}
+
+// ---- per-member receipts (delivered / read) ----
+
+export interface ChannelMemberState {
+  sessionId: string;
+  deliveredAt: number | null;
+  readAt: number | null;
+}
+
+export function channelMemberStates(channelId: string): ChannelMemberState[] {
+  return selectChannelMemberState.all(channelId) as ChannelMemberState[];
+}
+
+/** A channel message reached this member's live terminal (fan-out succeeded). */
+export function markChannelDelivered(channelId: string, sessionId: string): void {
+  upsertChannelDelivered.run({ channelId, sessionId, at: now() });
+  bus.emit('channelState', { channelId, states: channelMemberStates(channelId) });
+}
+
+/** This member pulled the channel (check_inbox / read_channel) — it has now seen
+ *  everything up to this moment. Read implies delivered. */
+export function markChannelRead(channelId: string, sessionId: string): void {
+  upsertChannelRead.run({ channelId, sessionId, at: now() });
+  bus.emit('channelState', { channelId, states: channelMemberStates(channelId) });
 }
 
 // ---- agent-facing read aggregations (the "pull" tools) ----
@@ -1725,10 +1793,13 @@ export interface ChannelDetail {
 }
 
 /** Roster (with bios + status) and the last `limit` messages of a channel, so an
- *  agent dropped into a group can orient: what is this, who is here, what was said. */
-export function readChannelDetail(channelId: string, limit = 50): ChannelDetail | undefined {
+ *  agent dropped into a group can orient: what is this, who is here, what was said.
+ *  When `readerId` is given (an agent reading its own channel), advances that
+ *  member's read receipt. */
+export function readChannelDetail(channelId: string, limit = 50, readerId?: string): ChannelDetail | undefined {
   const c = getChannel(channelId);
   if (!c) return undefined;
+  if (readerId && isParticipant(channelId, readerId)) markChannelRead(channelId, readerId);
   const members: ChannelMember[] = listParticipants(channelId).map((sid) => {
     const s = getSession(sid);
     return {

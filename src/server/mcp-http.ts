@@ -175,7 +175,7 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       if (!store.isParticipant(channelId, forId)) {
         throw new Error('not a participant of this channel');
       }
-      return store.readChannelDetail(channelId, limit ?? 50) ?? null;
+      return store.readChannelDetail(channelId, limit ?? 50, forId) ?? null;
     },
     async getAgent(_forId, agentId) {
       return store.agentProfile(agentId) ?? null;

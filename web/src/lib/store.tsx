@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Channel, ChannelMessage, Message, Session, WsEvent } from "../types";
+import type { Channel, ChannelMemberState, ChannelMessage, Message, Session, WsEvent } from "../types";
 import {
   addChannelParticipant,
   answerChannelAsk as answerChannelAskApi,
@@ -75,6 +75,7 @@ interface StoreState {
   channels: Channel[];
   channelMessages: Record<string, ChannelMessage[]>;
   channelParticipants: Record<string, string[]>;
+  channelStates: Record<string, ChannelMemberState[]>;
   ensureChannelDetail: (channelId: string) => Promise<void>;
   createChannel: (name: string, participants: string[]) => Promise<Channel>;
   renameChannel: (channelId: string, name: string) => Promise<void>;
@@ -111,6 +112,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   >({});
   const [channelParticipants, setChannelParticipants] = useState<
     Record<string, string[]>
+  >({});
+  const [channelStates, setChannelStates] = useState<
+    Record<string, ChannelMemberState[]>
   >({});
   const loadedChannelsRef = useRef<Set<string>>(new Set());
 
@@ -331,6 +335,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         });
         break;
       }
+      case "channel-state": {
+        setChannelStates((prev) => ({ ...prev, [e.channelId]: e.states }));
+        break;
+      }
     }
   }, []);
 
@@ -419,6 +427,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const d = await getChannelApi(channelId);
       setChannelMessages((prev) => ({ ...prev, [channelId]: d.messages }));
       setChannelParticipants((prev) => ({ ...prev, [channelId]: d.participants }));
+      if (d.states) setChannelStates((prev) => ({ ...prev, [channelId]: d.states! }));
     } catch {
       loadedChannelsRef.current.delete(channelId);
     }
@@ -590,6 +599,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       channels,
       channelMessages,
       channelParticipants,
+      channelStates,
       ensureChannelDetail,
       createChannel,
       renameChannel,
@@ -625,6 +635,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       channels,
       channelMessages,
       channelParticipants,
+      channelStates,
       ensureChannelDetail,
       createChannel,
       renameChannel,

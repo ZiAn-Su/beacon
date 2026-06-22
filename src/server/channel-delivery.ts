@@ -56,6 +56,8 @@ export function fanOutChannelMessage(m: ChannelMessage): void {
   });
   for (const pid of store.listParticipants(m.channelId)) {
     if (pid === m.fromSessionId) continue;
-    writeToPty(pid, line); // spawns an idle agent on demand; false for non-agents
+    // writeToPty spawns an idle agent on demand; true means it reached a live
+    // terminal — record that as a delivery receipt (false for non-agent runtimes).
+    if (writeToPty(pid, line)) store.markChannelDelivered(m.channelId, pid);
   }
 }
