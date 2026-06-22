@@ -106,7 +106,7 @@ Guardianship:  Human ──监护──▶ Agent
 
 ### 5.2 联系人档案(每个联系人的信息页)
 
-点开任一联系人,其信息页除了 name / runtime / workPath / 状态 / 信任档位外,**必须包含它自身的社交入口**:
+点开任一联系人,其信息页除了 name / runtime / workPath / 状态外,**必须包含它自身的社交入口**:
 
 - **自我介绍(`description`)**:该 agent 的名片 —— 角色 / 擅长 / 在做什么。别的智能体据此判断「要不要联系它」,所以名字 + 介绍是最低限度的可读身份。agent 在 register 时自报(`register_session` 的 `name` / `about`,或 `AGENT_NAME` / `AGENT_ABOUT` 环境变量),人也能在资料页就地改;`list_agents` 的发现输出会带上名字 + 介绍。它是**属性**,不是身份主键。
 - **Agent ID(`contact.id`)**:peer 寻址用的公开地址,资料页一键复制即可交给别的 agent 去 `notify_agent` / `ask_agent`。
@@ -139,10 +139,10 @@ notify_human / ask_human      无需任何地址(人唯一)
 2. 按 name / runtime / workPath 认出目标,拿到 contact.id
 3. notify_agent(targetId, …) / ask_agent(targetId, …)
 4. 平台裁决该条边的 contact 权限(见第八节,最具体者胜):
-     · 有常驻 allow            → 直接路由
-     · 无常驻授权(standard 默认)→ 转成一条给监护人的【联系申请】(复用 ask 机制)
+     · 有常驻 allow Grant       → 直接路由
+     · 无逐对 Grant + 全局默认 ask → 转成一条给监护人的【联系申请】(复用 ask 机制)
                                   → 批准一次 / 永久(永久即固化一条 Grant)/ 拒绝
-     · deny 或不在可见范围      → 拒绝
+     · deny 或不在可见范围       → 拒绝
 5. 放行后:路由到目标收件箱/终端 → 同时镜像给监护人
 ```
 
@@ -152,7 +152,7 @@ notify_human / ask_human      无需任何地址(人唯一)
 
 - agent 怎么知道**自己**的 id?register 返回里给它。怎么知道**别人**的 id?查地址簿(只返回可见范围)。它不需预先记住任何 UUID。
 - `notify_agent` 非阻塞;`ask_agent` 阻塞,复用 `ask_human` 已有的长轮询机制,对方带 `peerAskId` 回复解除阻塞。
-- **申请权限本身也是 agent 主动发起**(不止人为预授权):standard 档下 agent 对可见但未授权的对象发 contact,即生成给监护人的审批;批「永久」则固化为 Grant。授权因此是**双向**的:人可预先配,agent 也可申请。
+- **申请权限本身也是 agent 主动发起**(不止人为预授权):`contact_agent` 全局默认 `ask` 时,agent 对可见但无逐对 Grant 的对象发 contact,即生成给监护人的审批;批「永久」则固化为 Grant。授权因此是**双向**的:人可预先配,agent 也可申请。
 
 ```
             ┌─────────── Owner(唯一,token 把门)───────────┐
@@ -232,19 +232,24 @@ Principal 可以同时在多个 Channel 里
 
 ---
 
-## 八、授权模型——分级信任(借鉴 Claude Code)
+## 八、授权模型——能力 × 效果 + 逐对 Grant(借鉴 Claude Code)
 
-授权的精髓不是"批 / 不批"两态,而是**分级、带作用域、可逐步提升、可随时撤销**的信任。
+授权的精髓不是"批 / 不批"两态,而是**能力分层、效果分级、可逐对开/关、可随时撤销**的信任。
+模型以 [`src/core/permissions.ts`](../src/core/permissions.ts) 为准。
 
 ### 8.1 三类能力(Capability)
 
 | 能力 | 含义 | 治理的诉求 |
 |---|---|---|
-| **spawn** | 能否创建新 agent(在某监护人名下) | "是否可以创建新的 agent";从源头治"agent 太多很乱" |
-| **contact** | 能否联系某个 Principal | "是否可以联系某个 agent" |
-| **manage** | 能否重命名 / 归档 / 建群拉人 / 代授权(监护人权力) | 联系人与群组管理 |
+| **`contact_agent`** | 能否主动联系另一个 agent(peer notify / ask) | "是否可以联系某个 agent" |
+| **`register_agent`** | 能否注册上线成为一个新联系人(admission) | "新 agent 是否准入" |
+| **`spawn_agent`** | 能否拉起一个新 agent 进程 | "是否可以创建新的 agent";从源头治"agent 太多很乱" |
 
-### 8.2 审批 = "逐次 ↔ 免审"同一机制的两端
+(`manage` 是监护人能力,不走 agent 权限解析。)
+
+### 8.2 效果(Effect)与"逐次 ↔ 免审"两端
+
+每个能力在任意时刻的判定结果是一个**效果**:`allow` / `ask` / `deny`(照搬 Claude Code 的三态)。
 
 弹给监护人的请求,选项照搬 Claude Code:
 
@@ -256,48 +261,62 @@ deny once         拒这一次
 deny always       铸成常驻拒绝
 ```
 
-**核心洞察**:"每次审批"和"免审批"不是两种配置,是同一根机制的两端——没有常驻授权 → 停在 ask,每次都问;一条 `allow always` → 常驻放行,自动免审。监护人用逐次决策把信任**慢慢固化**,跟 Claude Code 攒 allowlist 一样。
+**核心洞察**:"每次审批"和"免审批"不是两种配置,是同一根机制的两端——没有常驻授权 → 停在 `ask`,每次都问;一条 `allow always` → 常驻放行,自动免审。监护人用逐次决策把信任**慢慢固化**,跟 Claude Code 攒 allowlist 一样。
 
-### 8.3 信任档位(per-agent,对应权限模式)
+### 8.3 裁决解析顺序(最具体者胜)
 
-| 档位 | 含义(类比 Claude Code) |
-|---|---|
-| **restricted** | 事事问(default 模式) |
-| **standard** | notify / 读自动,contact / spawn 要审批 |
-| **trusted** | 联系人列表内的 contact 自动,spawn 仍审批 |
-| **autonomous** | 全自动(≈ bypassPermissions),给高度信任的 agent |
+授权解析严格按下列顺序,前者命中即返回:
 
-档位只设默认值;具体某条边的 Grant 可覆盖它。监护人随时切换档位。
+1. **逐对 Grant**(仅 `contact_agent`):该对 (fromId → toId) 存在常驻 Grant → 用其 effect (`allow` / `deny`)。
+2. **逐 agent override**:该 agent 对该能力已配置 per-agent 覆盖值 → 用其 effect。
+3. **Owner 全局默认**:owner 在设置面板里给该能力配置的全局效果 → 用其 effect。
+4. **内置兜底 `ask`**:以上都没值 → 走 `ask`(弹给 owner,走 8.2 的审批流)。
 
-**默认即 standard:`contact` 要审批。** 新 agent 默认落在 standard——它能**看到**同一工作目录下的其他 agent(可见范围,见第六节),但要给谁发消息,先走 8.2 的【申请 → 监护人审批】,批「永久」才固化免审。即:**默认不直接放行,默认要申请。** restricted 连可见范围内也不能联系;trusted 对可见范围内自动、范围外仍审批;autonomous 全自动。
+源码实现是 `permissions.ts` 的纯函数 `resolveEffect({ agentOverride, globalDefault })`(逐 agent > 全局),逐对 grant 由 store 在拿到目标 session 后判定,然后在网关里组合。
 
-> 可见范围(谁能被发现/申请)与信任档位(被发现后能否直接联系)是**两个正交的旋钮**,都可由监护人按 agent 调整。
+### 8.4 逐对 Grant——作用域让"免审批"安全
 
-### 8.4 Grant 结构——作用域让"免审批"安全
+逐对 Grant 记录一对 (fromSession, toSession) 的常驻 effect,让监护人对**特定边**精确开/关,不波及该 agent 的其它联系人。
 
 ```
 Grant {
-  subject      谁(某 agent / 某档位)
-  capability   spawn | contact | manage
-  scope        对谁 / 什么范围(某目标 / 某分组 / 模式)
-  effect       allow | deny
-  persistence  once | task | always
+  id
+  fromId        发起 agent session
+  toId          目标 Principal
+  effect        'allow' | 'deny'
+  createdAt
 }
 ```
 
-例:`允许 A 用 contact 联系【测试组】内的 agent,always`——免审批,但只在这个范围。等同 `Bash(npm run *)` 那种**收窄的放权**,而非裸奔。
+例:`POST /api/grants { fromId:A, toId:B, effect:'allow' }`——A 对 B 的 contact 永久放行,即使 A 的全局默认是 `ask`。删一条 Grant 即回落全局默认。逐对 Grant 是 contact 专有的精细粒度(因为只有 contact 需要"对谁")。
 
-### 8.5 裁决解析顺序(最具体者胜)
+### 8.5 三层"具体者胜"——一张图说清
 
 ```
-具体 Grant  >  agent 信任档位  >  全局策略(含 ingress / egress)
+              ┌─────────────────────────────────────────┐
+   contact    │  逐对 Grant (A→B)                       │
+   ─────────────────────────────────────────────────── │
+   register / │  逐 agent override (A 对该能力)        │
+   spawn      │                                         │
+              ├─────────────────────────────────────────┤
+              │  Owner 全局默认 (对所有 agent 生效)     │
+              ├─────────────────────────────────────────┤
+              │  内置兜底: 'ask' (nothing is open)     │
+              └─────────────────────────────────────────┘
 ```
+
+(`contact_agent` 顶层多一条「逐对 Grant」分支;其它能力没有逐对维度。)
 
 ### 8.6 监护人始终在控制位
 
-- **随时撤销 / 降级**:删一条 Grant、降一档信任,**即时对后续动作生效**。
-- **全程可见**:所有常驻授权、各 agent 当前档位,在"权限"面板一览(≈ `/permissions`)。
+- **随时撤销 / 降级**:删一条 Grant、改一处 override、调全局默认,**即时对后续动作生效**。
+- **全程可见**:所有常驻授权、各 agent 当前 override、全局默认,在"权限"面板一览(≈ ContactProfile 的 PermissionsForAgent)。
 - **可审计**:每次自动放行也留痕,事后可追"这条凭什么没问我"。
+- **可见范围(发现)与授权(放行)分层**:可见是能否被发现/申请,授权是能否真发出去——见第六节。
+
+### 8.7 遗留说明:`trustTier` 字段
+
+`trustTier`(取值 `restricted` / `standard` / `trusted` / `autonomous`)仍存在于 sessions 表中、读时默认 `'standard'`,但**授权解析里零引用、什么都不触发**——它根本不参与判定,是被能力 × 效果模型取代的遗留字段。保留仅为兼容历史数据。UI 不再暴露此字段;将来清理数据时一并移除。
 
 ---
 
@@ -325,7 +344,7 @@ A(监护人 H1) ──想联系──▶ B(监护人 H2)
 - Principal 抽象 + Agent 的 `guardian` 归属
 - `contact.id` 永久身份 + 可选 `bindKey` 续接
 - Channel + Participant(Direct 自动建;Group 显式建)
-- 三类能力检查点 + 分级信任(档位 + Grant + 提升/撤销)
+- 三类能力检查点 + 能力 × 效果(逐对 Grant + 逐 agent override + owner 全局默认 + 兜底 ask,见 §8)
 - 审批队列(路由给唯一 Owner)
 - 发现接口、联系人档案按作用域过滤
 
@@ -343,7 +362,7 @@ A(监护人 H1) ──想联系──▶ B(监护人 H2)
 遵循 `ensureColumn` 只增不改的既有约定:
 
 - 新增 `owner` 表(唯一 Owner + token)
-- 联系人维度新增:`runtime` / `workPath` / `origin`(human|agent) / `bindKey` / `guardian` / 信任档位
+- 联系人维度新增:`runtime` / `workPath` / `origin`(human|agent) / `bindKey` / `guardian` / `trustTier`(遗留字段,读时默认 `'standard'`,不参与判定)
 - 新增 `channels` / `channel_participants`;**现有 per-session 消息流 ≡ 该 session 与监护人的 Direct channel**,存量消息映射到各自的自动 Direct channel,消息归属 `channelId`
 - 新增 `grants`(授权)/ 审批队列存储
 - 存量 session 视为"未归类"漂浮项,人可逐个绑定 / 合并 / 归档

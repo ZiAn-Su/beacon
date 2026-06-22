@@ -3,6 +3,18 @@
 > 依据 [`docs/identity-design.md`](identity-design.md) 的顶层设计落地。**只增不改、向后兼容**——
 > 旧 agent 接入不受影响,旧库 `ensureColumn` 原地迁移。核心语义见设计文档;本文是实现规格。
 
+## 状态标注(必读)
+
+本文是 P1/P4 等历史切片的**实现规范**,保留切片当时的完整写法供审计参考。
+
+**现行授权模型**与本规范描述不完全一致:
+
+- **现行模型**(以 [`src/core/permissions.ts`](../src/core/permissions.ts) 为准):授权 = 能力(`contact_agent` / `register_agent` / `spawn_agent`)× 效果(`allow` / `ask` / `deny`)。
+- **解析顺序**:逐对 grant (contact only) > 逐 agent override > owner 全局默认 > 内置兜底 'ask'。
+- **`trustTier` 是遗留字段**:仍在 sessions 表里、读时默认 `'standard'`,但**授权解析里零引用、什么都不触发**,不是「restricted 触发 deny」——它根本不参与判定。已被能力 × 效果取代,保留仅为兼容历史数据。
+
+下文 P4 切片 1 段落里出现的 trustTier / 四档描述均为切片当时规范,不动即可,不视作现状。
+
 ## 总分期(build order)
 
 | 阶段 | 内容 | 风险 |
