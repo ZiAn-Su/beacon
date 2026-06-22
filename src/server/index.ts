@@ -26,6 +26,7 @@ import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
 import { getSettings, setSettings } from '../core/settings';
+import { saveUpload, resolveUpload } from './uploads';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 4319);
@@ -49,7 +50,14 @@ const SKILL_DIR = join(REPO_ROOT, 'skill/beacon');
 const BEACON_CLI = join(SKILL_DIR, 'beacon.mjs');
 
 const app = express();
-app.use(express.json({ limit: '1mb' }));
+// Image uploads carry a base64 body that can be several MB; everything else stays
+// on the tight 1mb limit. Route the big parser only at /api/uploads.
+const jsonSmall = express.json({ limit: '1mb' });
+const jsonUpload = express.json({ limit: '28mb' });
+app.use((req, res, next) => {
+  if (req.path === '/api/uploads') return jsonUpload(req, res, next);
+  return jsonSmall(req, res, next);
+});
 // ISS-009: return JSON error (not HTML stack-trace) for malformed request bodies.
 app.use((err: unknown, _req: Request, res: Response, next: (e: unknown) => void) => {
   const e = err as { type?: string; status?: number; message?: string };
@@ -572,7 +580,25 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
     }
   }
   const text = String(req.body?.text ?? '');
-  const message = store.reply(param(req,'id'), text, rawAskId);
+  // Image attachments: the client sends upload ids; we re-derive the authoritative
+  // path/mime/url server-side (never trust a client-sent path). Stored in the
+  // message meta for the UI thumbnail; the absolute path is appended to the text
+  // delivered to the agent so it can read the file.
+  const rawAtt = Array.isArray(req.body?.attachments) ? req.body.attachments : [];
+  const attachments: { id: string; name: string; mime: string; url: string; path: string }[] = [];
+  for (const a of rawAtt) {
+    const aid = String(a?.id ?? '');
+    const found = resolveUpload(aid);
+    if (!found) continue;
+    const name = String(a?.name ?? '').slice(0, 200) || aid;
+    attachments.push({ id: aid, name, mime: found.mime, url: `/api/uploads/${aid}`, path: found.path });
+  }
+  const meta = attachments.length ? { attachments } : null;
+  const message = store.reply(param(req,'id'), text, rawAskId, meta);
+  // What the agent actually receives: the caption plus each image's absolute path.
+  const deliveredText = attachments.length
+    ? [text.trim(), ...attachments.map((a) => `[image: ${a.path}]`)].filter(Boolean).join(' ')
+    : text;
   // If this answer settles a pending spawn request (the owner approving inline
   // from the chat card), perform the launch here — core can't touch the PTY.
   if (rawAskId) {
@@ -597,11 +623,11 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   } else if (hasLivePty(session.id)) {
     // ISS-010: check writeToPty return value — non-agent runtimes return false
     // even when a PTY exists (e.g. bare cmd.exe shells). Don't claim 'online'.
-    if (!writeToPty(session.id, text)) agent = 'queued';
+    if (!writeToPty(session.id, deliveredText)) agent = 'queued';
   } else if (isOnline(session)) {
     // An autonomous agent (MCP/skill) is actively polling its inbox; leave the
     // message for it to pick up rather than spawning a duplicate terminal.
-  } else if (writeToPty(session.id, text)) {
+  } else if (writeToPty(session.id, deliveredText)) {
     // No agent anywhere — start an interactive terminal on demand and type into
     // it. Output is buffered until the user opens the Terminal view.
   } else {
@@ -905,6 +931,34 @@ app.get('/api/sessions/:id/channel-inbox', (req: Request, res: Response) => {
   if (!store.getSession(id)) return notFound(res);
   const after = Number(req.query.after ?? 0) || 0;
   ok(res, { messages: store.channelInbox(id, after) });
+});
+
+// Image upload (north). Body { name?, mime, dataBase64 }. Returns the saved
+// upload with a serving url (for the UI thumbnail) and absolute path (handed to
+// the agent so it can read the file). The 28mb parser is scoped to this path.
+app.post('/api/uploads', (req: Request, res: Response) => {
+  const body = req.body ?? {};
+  if (typeof body.mime !== 'string' || typeof body.dataBase64 !== 'string') {
+    res.status(400).json({ error: 'mime and dataBase64 are required' });
+    return;
+  }
+  try {
+    const upload = saveUpload({ name: body.name ?? null, mime: body.mime, dataBase64: body.dataBase64 });
+    ok(res, { upload });
+  } catch (e) {
+    res.status(400).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+// Serve an uploaded image by id.
+app.get('/api/uploads/:id', (req: Request, res: Response) => {
+  const found = resolveUpload(param(req, 'id'));
+  if (!found) {
+    res.status(404).json({ error: 'not found' });
+    return;
+  }
+  res.type(found.mime);
+  res.sendFile(found.path);
 });
 
 app.get('/api/health', (_req: Request, res: Response) =>

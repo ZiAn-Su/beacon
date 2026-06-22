@@ -827,7 +827,8 @@ export function waitForAsk(askId: string, timeoutMs: number): Promise<Ask> {
 export function reply(
   sessionId: string,
   text: string,
-  askId?: string | null
+  askId?: string | null,
+  meta?: Record<string, unknown> | null,
 ): Message {
   const ask = askId ? getAsk(askId) : undefined;
   const isAnswer = !!(ask && ask.status === 'pending');
@@ -837,6 +838,7 @@ export function reply(
     kind: isAnswer ? 'answer' : 'chat',
     text,
     askId: isAnswer ? askId : null,
+    meta: meta ?? null,
   });
   if (isAnswer) {
     updateAskAnswer.run({ id: askId, answer: text, answeredAt: now() });
