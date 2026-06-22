@@ -16,6 +16,7 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import * as store from '../core/store';
 import { registerBeaconTools, type AgentOps } from '../mcp/tools';
 import { resolveActiveSessionId } from './agent-sessions';
+import { fanOutChannelMessage } from './channel-delivery';
 
 // The launch side effect (PTY) lives in the gateway; the hosted MCP receives it
 // as a callback so spawn_agent can run in-process without reaching back over HTTP.
@@ -147,7 +148,7 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       if (!store.isParticipant(channelId, fromId)) {
         throw new Error('not a participant of this channel');
       }
-      store.postChannelMessage(channelId, fromId, text);
+      fanOutChannelMessage(store.postChannelMessage(channelId, fromId, text));
     },
     async askChannel(fromId, channelId, question, options) {
       if (!store.getChannel(channelId)) throw new Error('channel not found');
@@ -155,7 +156,8 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       if (!store.isParticipant(channelId, fromId)) {
         throw new Error('not a participant of this channel');
       }
-      const { ask } = store.createChannelAsk(channelId, fromId, question, options ?? null);
+      const { ask, message } = store.createChannelAsk(channelId, fromId, question, options ?? null);
+      fanOutChannelMessage(message);
       return { askId: ask.id };
     },
     async answerChannel(fromId, channelId, askId, text) {
@@ -163,7 +165,7 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       if (!store.isParticipant(channelId, fromId)) {
         throw new Error('not a participant of this channel');
       }
-      store.answerChannelAsk(channelId, askId, fromId, text);
+      fanOutChannelMessage(store.answerChannelAsk(channelId, askId, fromId, text));
     },
     async channelInbox(id, after) {
       return store.channelInbox(id, after);

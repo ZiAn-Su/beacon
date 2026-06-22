@@ -23,6 +23,7 @@ import {
 } from '../core/permissions';
 import { mountMcpHttp } from './mcp-http';
 import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty } from './pty';
+import { fanOutChannelMessage } from './channel-delivery';
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
 import { getSettings, setSettings } from '../core/settings';
@@ -845,7 +846,9 @@ app.post('/api/channels/:id/messages', (req: Request, res: Response) => {
   if (!store.getChannel(id)) return channelNotFound(res);
   const text = String(req.body?.text ?? '');
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
-  ok(res, { message: store.postChannelMessage(id, null, text) });
+  const message = store.postChannelMessage(id, null, text);
+  fanOutChannelMessage(message);
+  ok(res, { message });
 });
 
 // Owner answers a pending channel ask (an agent asked the group). First answer
@@ -857,7 +860,17 @@ app.post('/api/channels/:id/answer', (req: Request, res: Response) => {
   const text = String(req.body?.text ?? '');
   if (!askId) { res.status(400).json({ error: 'askId is required' }); return; }
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
-  ok(res, { message: store.answerChannelAsk(id, askId, null, text) });
+  const message = store.answerChannelAsk(id, askId, null, text);
+  fanOutChannelMessage(message);
+  ok(res, { message });
+});
+
+// North (UI): the channels a given session belongs to — powers the contact
+// profile's "in these channels" section. Human-facing, so no agent token.
+app.get('/api/sessions/:id/member-channels', (req: Request, res: Response) => {
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  ok(res, { channels: store.channelsForSession(id) });
 });
 
 // --- south (agent) channel access ---
@@ -874,7 +887,9 @@ app.post('/api/sessions/:id/channel-post', (req: Request, res: Response) => {
   }
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
   store.touchSeen(id);
-  ok(res, { message: store.postChannelMessage(channelId, id, text) });
+  const message = store.postChannelMessage(channelId, id, text);
+  fanOutChannelMessage(message);
+  ok(res, { message });
 });
 
 // An agent posts a BLOCKING question to a channel it belongs to. Returns askId;
@@ -893,7 +908,8 @@ app.post('/api/sessions/:id/channel-ask', (req: Request, res: Response) => {
   }
   if (!question.trim()) { res.status(400).json({ error: 'question is required' }); return; }
   store.touchSeen(id);
-  const { ask } = store.createChannelAsk(channelId, id, question, options);
+  const { ask, message } = store.createChannelAsk(channelId, id, question, options);
+  fanOutChannelMessage(message);
   ok(res, { askId: ask.id });
 });
 
@@ -912,7 +928,9 @@ app.post('/api/sessions/:id/channel-answer', (req: Request, res: Response) => {
   if (!askId) { res.status(400).json({ error: 'askId is required' }); return; }
   if (!text.trim()) { res.status(400).json({ error: 'text is required' }); return; }
   store.touchSeen(id);
-  ok(res, { message: store.answerChannelAsk(channelId, askId, id, text) });
+  const message = store.answerChannelAsk(channelId, askId, id, text);
+  fanOutChannelMessage(message);
+  ok(res, { message });
 });
 
 // Channels an agent belongs to (for its addressing/list view).

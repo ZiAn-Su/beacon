@@ -705,7 +705,10 @@ function renderChannelLine(m: {
   if (m.kind === 'answer') {
     return `[#${m.channelName} · ${who} answered] ${m.text}`;
   }
-  return `[#${m.channelName} · ${who}] ${m.text}`;
+  return (
+    `[#${m.channelName} · ${who}] ${m.text}  ` +
+    `(reply to the group with post_channel channel_id=${m.channelId})`
+  );
 }
 
 /**
