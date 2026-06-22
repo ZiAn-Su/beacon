@@ -388,6 +388,12 @@ function spawnAgent(params: {
   // Start a fresh agent process (not a resume) in the folder.
   markFreshLaunch(session.id);
   const launched = ensurePty(session.id);
+  // Hand the agent its task so it actually starts working. writeToPty queues
+  // during the boot window and flushes once the TUI is ready, so this lands as
+  // the agent's first input. Guarded on a real task: a human "launch" with no
+  // task still just opens an idle terminal (unchanged).
+  const task = (params.task ?? '').trim();
+  if (launched && task) writeToPty(session.id, spawnBootstrap(task));
   return { session, launched };
 }
 
@@ -583,6 +589,18 @@ function stampMMDDHHMM(ts: number): string {
 }
 function guardianDeliveryLine(text: string, ts: number): string {
   return `[Beacon · from your guardian · ${stampMMDDHHMM(ts)}] ${text} (reply via Beacon)`;
+}
+
+// First message handed to a freshly spawned agent. Without this the agent boots
+// into a blank prompt and just idles (then gets reaped) — its task lives only as
+// metadata it never sees. The beacon MCP tools and the BEACON_SESSION_ID env are
+// already wired at spawn; the agent only needs orientation + its task to start.
+function spawnBootstrap(task: string): string {
+  return (
+    `You are a Beacon agent. Your session id is in env BEACON_SESSION_ID, and you have the "beacon" MCP tools (mcp__beacon__*) to coordinate with your team and human guardian: ` +
+    `update_status (working/idle/done), notify_human or post_channel to report progress, ask_human or ask_channel when you need a decision, check_inbox to read messages. ` +
+    `Your task: ${task} . Start now; report your plan or any blocking question via beacon before doing large work, and update_status to done when finished.`
+  );
 }
 
 app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
