@@ -73,6 +73,7 @@ const run = (cmd, cwd = root) => {
 // 3. verify
 run('npm run typecheck');
 run('npm run check:encoding');
+run('npm run test');
 run('npm run build', webRoot);
 
 // 4. bump both manifests

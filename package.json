@@ -19,7 +19,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check:encoding": "node scripts/check-encoding.mjs",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
-    "verify": "npm run typecheck && npm run check:encoding && npm run build:web"
+    "verify": "npm run typecheck && npm run check:encoding && npm run test && npm run build:web"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
