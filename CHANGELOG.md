@@ -3,6 +3,37 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.8.0] - 2026-06-22
+
+### 新增 —— 群聊成体系 + agent 可主动拉取上下文
+
+群聊从「能广播」走到「能协作」:
+
+- **频道消息真正送达 agent 终端**:此前只存库、不推终端,发了没人回。现在每条频道消息(人发 /
+  agent 发 / 群 ask / 群 answer)都扇出到其余成员的 ConPTY(和 1:1 一样按需拉起空闲 agent),
+  并框定群语境(哪个频道、谁说、用 `post_channel`/`answer_channel` 回到群里)。
+- **逐成员已读(两级回执)**:已送达 ✓(消息打进成员活终端)/ 已读 ✓✓(成员 `check_inbox` /
+  `read_channel` 拉取);UI 每条消息按 agent 成员显示角标。终端型 agent 不轮询时诚实显示「已送达」
+  不假装「已读」。新增 `channel_member_state` 表 + `channelState` 实时 WS。
+- **群内 @定向**:消息/提问可点名某成员(`channel_messages.toSessionId` / `post_channel`/`ask_channel`
+  的 `to_agent_id`),仍全员可见;目标收「(addressed to YOU)」、旁人收「(addressed to X)」;定向
+  ask 仍首答生效。
+- **主动拉取上下文**:新增南向工具 `read_channel`(频道名册+历史)、`get_agent`(某 agent 公开档案)、
+  `whoami`(自身处境:身份/所在群/待答群提问)。Beacon 从「信箱」升级成「信息源」。
+- **人始终在场**:agent↔agent 的 peer 消息计入未读(不再静默);`read_channel` 显式声明监护人在场;
+  频道成员管理(加/移)可见 + 在线状态环;联系人资料页新增「所属群聊」入口。
+
+### 修复 —— 1:1 私聊:agent 回复回不到私聊
+
+`/reply` 此前把人的消息**原文**打进 agent 终端、零框定,agent 不知道这是 Beacon 上监护人发来的、
+也不知道要用 Beacon 工具回复,于是在终端里自答、回复回不到私聊。现在 1:1 投递同样框定:
+「这是监护人通过 Beacon 发来的,请用 `notify_human` / `ask_human`(或 beacon skill)回复,只在终端
+里答不会送达」。`/start` 的首条消息同样框定。
+
+### 修复 —— 版本号停在 0.7.6
+
+平台版本读自 `package.json`,而此前一直未随发布 bump。本次起恢复版本纪律。
+
 ## [0.7.6] - 2026-06-21
 
 ### 新增 —— 终端 agent 实时状态上报 Beacon(v1)+ 自动越过开机门

@@ -569,6 +569,18 @@ app.get('/api/sessions/:id/messages', (req: Request, res: Response) => {
   ok(res, { session, messages: store.messages(param(req,'id')) });
 });
 
+// Frame a 1:1 message typed into an agent's terminal so it knows the message
+// came from its guardian via Beacon and must reply THROUGH Beacon — otherwise a
+// ConPTY agent just answers in the terminal and the human never sees it in chat.
+// English only (src/** stays ASCII); the message text is data, passed verbatim.
+function guardianDeliveryLine(text: string): string {
+  return (
+    `[Beacon: message from your guardian] ${text} ` +
+    `(reply THROUGH Beacon — use your notify_human / ask_human tool, or the beacon skill, ` +
+    `so it reaches them in the app; answering only in this terminal will NOT reach them)`
+  );
+}
+
 app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   if (!store.getSession(param(req,'id'))) return notFound(res);
   // ISS-006: if caller supplies an askId, verify it exists and is still pending
@@ -596,10 +608,13 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   }
   const meta = attachments.length ? { attachments } : null;
   const message = store.reply(param(req,'id'), text, rawAskId, meta);
-  // What the agent actually receives: the caption plus each image's absolute path.
-  const deliveredText = attachments.length
+  // What the agent actually receives: the caption plus each image's absolute
+  // path, wrapped so a terminal agent knows it's a Beacon message from its
+  // guardian and must reply through Beacon (not just answer in the terminal).
+  const baseText = attachments.length
     ? [text.trim(), ...attachments.map((a) => `[image: ${a.path}]`)].filter(Boolean).join(' ')
     : text;
+  const deliveredText = guardianDeliveryLine(baseText);
   // If this answer settles a pending spawn request (the owner approving inline
   // from the chat card), perform the launch here — core can't touch the PTY.
   if (rawAskId) {
@@ -649,11 +664,14 @@ app.post('/api/sessions/:id/start', (req: Request, res: Response) => {
   const session = store.getSession(param(req, 'id'));
   if (!session) return notFound(res);
   const text = String(req.body?.text ?? '');
+  // Frame a non-empty kickoff the same way /reply does, so the agent replies
+  // through Beacon rather than only in its terminal.
+  const delivered = text.trim() ? guardianDeliveryLine(text) : text;
   // Prefer the persistent ConPTY path (same as /reply's on-demand spawn). On
   // Windows its subprocesses inherit a hidden pseudo-console, so the agent's
   // tool calls (bash/git/...) don't pop console windows — unlike a piped
   // `--print` child, whose grandchildren each allocate a visible console.
-  if (writeToPty(session.id, text)) {
+  if (writeToPty(session.id, delivered)) {
     if (session.status !== 'working') store.setStatus(session.id, 'working');
     ok(res, { result: 'started' });
     return;
