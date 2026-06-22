@@ -622,6 +622,16 @@ app.post('/api/sessions/:id/start', (req: Request, res: Response) => {
   const session = store.getSession(param(req, 'id'));
   if (!session) return notFound(res);
   const text = String(req.body?.text ?? '');
+  // Prefer the persistent ConPTY path (same as /reply's on-demand spawn). On
+  // Windows its subprocesses inherit a hidden pseudo-console, so the agent's
+  // tool calls (bash/git/...) don't pop console windows — unlike a piped
+  // `--print` child, whose grandchildren each allocate a visible console.
+  if (writeToPty(session.id, text)) {
+    if (session.status !== 'working') store.setStatus(session.id, 'working');
+    ok(res, { result: 'started' });
+    return;
+  }
+  // Fallback: a runtime Beacon can't drive as a ConPTY agent.
   const result = startAgent(session, text, getSettings().startPermission);
   ok(res, { result });
 });
