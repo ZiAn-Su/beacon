@@ -89,6 +89,37 @@ export interface AgentOps {
       createdAt: number;
     }[]
   >;
+  // Pull tools: acquire context, not just receive it.
+  readChannel(
+    forId: string,
+    channelId: string,
+    limit?: number,
+  ): Promise<{
+    channel: { id: string; name: string };
+    members: { id: string; name: string | null; task: string; about: string | null; status: string; runtime: string }[];
+    messages: { fromSessionId: string | null; text: string; kind: 'chat' | 'ask' | 'answer'; askId: string | null; createdAt: number }[];
+  } | null>;
+  getAgent(
+    forId: string,
+    agentId: string,
+  ): Promise<{
+    id: string;
+    name: string | null;
+    task: string;
+    about: string | null;
+    status: string;
+    runtime: string;
+    origin: string;
+  } | null>;
+  whoami(forId: string): Promise<{
+    id: string;
+    name: string | null;
+    task: string;
+    status: string;
+    runtime: string;
+    channels: { id: string; name: string }[];
+    pendingAsks: { channelId: string; channelName: string; askId: string; question: string; fromSessionId: string | null }[];
+  }>;
 }
 
 export interface AgentDefaults {
@@ -639,6 +670,81 @@ export function registerBeaconTools(
       return { content: [{ type: 'text', text: 'Answered the channel.' }] };
     },
   );
+
+  server.registerTool(
+    'read_channel',
+    {
+      title: 'Read a channel: roster + recent history',
+      description:
+        'Pull a group channel you belong to: its members (each with their bio and current ' +
+        'status) and the recent message history. Use this to orient — what is this channel ' +
+        'about, who is in it, and what was said — before posting or asking. channel_id from ' +
+        'list_channels.',
+      inputSchema: {
+        channel_id: z.string().describe('Target channel id (from list_channels)'),
+        limit: z
+          .number()
+          .optional()
+          .describe('How many recent messages to return (default 50, max 200)'),
+      },
+    },
+    async ({ channel_id, limit }) => {
+      const id = await ensure();
+      let detail;
+      try {
+        detail = await ops.readChannel(id, channel_id, limit);
+      } catch (e) {
+        return {
+          content: [
+            { type: 'text', text: `Could not read channel: ${e instanceof Error ? e.message : String(e)}` },
+          ],
+        };
+      }
+      if (!detail) {
+        return { content: [{ type: 'text', text: 'Channel not found.' }] };
+      }
+      return { content: [{ type: 'text', text: renderChannelDetail(detail) }] };
+    },
+  );
+
+  server.registerTool(
+    'get_agent',
+    {
+      title: 'Look up another agent\'s profile',
+      description:
+        'Pull a peer agent\'s public profile — display name, what it is working on, its ' +
+        'self-introduction, runtime, and current status — so you can decide whether and who to ' +
+        'ask. Use an agent id from list_agents, a channel roster, or an inbox message.',
+      inputSchema: {
+        agent_id: z.string().describe('The agent id to look up'),
+      },
+    },
+    async ({ agent_id }) => {
+      const id = await ensure();
+      const profile = await ops.getAgent(id, agent_id);
+      if (!profile) {
+        return { content: [{ type: 'text', text: 'No such agent.' }] };
+      }
+      return { content: [{ type: 'text', text: renderAgentProfile(profile) }] };
+    },
+  );
+
+  server.registerTool(
+    'whoami',
+    {
+      title: 'Your own Beacon state',
+      description:
+        'Pull your own orientation on Beacon: your id, display name, task and status; the group ' +
+        'channels you belong to; and any group questions still awaiting an answer you could give. ' +
+        'Useful right after waking up or reconnecting.',
+      inputSchema: {},
+    },
+    async () => {
+      const id = await ensure();
+      const state = await ops.whoami(id);
+      return { content: [{ type: 'text', text: renderWhoami(state) }] };
+    },
+  );
 }
 
 /**
@@ -709,6 +815,100 @@ function renderChannelLine(m: {
     `[#${m.channelName} · ${who}] ${m.text}  ` +
     `(reply to the group with post_channel channel_id=${m.channelId})`
   );
+}
+
+/** Render read_channel: a header, the roster (name [status] — about), then the
+ *  recent history with each sender resolved against the roster. */
+function renderChannelDetail(d: {
+  channel: { id: string; name: string };
+  members: { id: string; name: string | null; task: string; about: string | null; status: string; runtime: string }[];
+  messages: { fromSessionId: string | null; text: string; kind: 'chat' | 'ask' | 'answer'; askId: string | null; createdAt: number }[];
+}): string {
+  const label = (id: string | null): string => {
+    if (!id) return 'the human guardian';
+    const m = d.members.find((x) => x.id === id);
+    const n = m?.name?.trim() || m?.task?.trim();
+    return n ? n : `agent ${id.slice(0, 8)}`;
+  };
+  const out: string[] = [`Channel #${d.channel.name}  (id=${d.channel.id})`];
+  out.push(`Members (${d.members.length}):`);
+  if (d.members.length === 0) {
+    out.push('  (no agents — only you and the guardian)');
+  } else {
+    for (const m of d.members) {
+      const nm = m.name?.trim() || m.task?.trim() || `agent ${m.id.slice(0, 8)}`;
+      let line = `  - ${nm} [${m.status}] (id=${m.id})`;
+      if (m.about && m.about.trim()) line += ` — ${m.about.trim()}`;
+      out.push(line);
+    }
+  }
+  out.push('Recent messages:');
+  if (d.messages.length === 0) {
+    out.push('  (no messages yet)');
+  } else {
+    for (const msg of d.messages) {
+      const who = label(msg.fromSessionId);
+      if (msg.kind === 'ask' && msg.askId) {
+        out.push(`  ${who} ASKS: ${msg.text}  (answer_channel channel_id=${d.channel.id} ask_id=${msg.askId})`);
+      } else if (msg.kind === 'answer') {
+        out.push(`  ${who} answered: ${msg.text}`);
+      } else {
+        out.push(`  ${who}: ${msg.text}`);
+      }
+    }
+  }
+  return out.join('\n');
+}
+
+/** Render get_agent: a peer's profile so the reader can decide who to ask. */
+function renderAgentProfile(p: {
+  id: string;
+  name: string | null;
+  task: string;
+  about: string | null;
+  status: string;
+  runtime: string;
+  origin: string;
+}): string {
+  const nm = p.name?.trim() || p.task?.trim() || `agent ${p.id.slice(0, 8)}`;
+  const lines = [
+    `${nm} [${p.status}]  (id=${p.id})`,
+    `    runtime: ${p.runtime} · origin: ${p.origin}`,
+  ];
+  if (p.task && p.task.trim()) lines.push(`    task: ${p.task.trim()}`);
+  if (p.about && p.about.trim()) lines.push(`    about: ${p.about.trim()}`);
+  return lines.join('\n');
+}
+
+/** Render whoami: identity, channels, and group asks awaiting an answer. */
+function renderWhoami(s: {
+  id: string;
+  name: string | null;
+  task: string;
+  status: string;
+  runtime: string;
+  channels: { id: string; name: string }[];
+  pendingAsks: { channelId: string; channelName: string; askId: string; question: string; fromSessionId: string | null }[];
+}): string {
+  const nm = s.name?.trim() || s.task?.trim() || `agent ${s.id.slice(0, 8)}`;
+  const out = [
+    `You are ${nm} [${s.status}]  (id=${s.id}, runtime ${s.runtime})`,
+    s.task && s.task.trim() ? `task: ${s.task.trim()}` : 'task: (none)',
+  ];
+  out.push(
+    s.channels.length
+      ? `Channels (${s.channels.length}): ${s.channels.map((c) => `#${c.name} (${c.id})`).join(', ')}`
+      : 'Channels: (none)',
+  );
+  if (s.pendingAsks.length) {
+    out.push(`Group questions awaiting an answer (${s.pendingAsks.length}):`);
+    for (const a of s.pendingAsks) {
+      out.push(`  #${a.channelName}: ${a.question}  (answer_channel channel_id=${a.channelId} ask_id=${a.askId})`);
+    }
+  } else {
+    out.push('Group questions awaiting an answer: (none)');
+  }
+  return out.join('\n');
 }
 
 /**
@@ -880,6 +1080,45 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         }[];
       }>(`/api/sessions/${id}/channel-inbox?after=${after}`);
       return messages;
+    },
+    async readChannel(forId, channelId, limit) {
+      const q = `channel=${encodeURIComponent(channelId)}${limit ? `&limit=${limit}` : ''}`;
+      const { detail } = await api<{
+        detail: {
+          channel: { id: string; name: string };
+          members: { id: string; name: string | null; task: string; about: string | null; status: string; runtime: string }[];
+          messages: { fromSessionId: string | null; text: string; kind: 'chat' | 'ask' | 'answer'; askId: string | null; createdAt: number }[];
+        } | null;
+      }>(`/api/sessions/${forId}/read-channel?${q}`);
+      return detail;
+    },
+    async getAgent(forId, agentId) {
+      const { profile } = await api<{
+        profile: {
+          id: string;
+          name: string | null;
+          task: string;
+          about: string | null;
+          status: string;
+          runtime: string;
+          origin: string;
+        } | null;
+      }>(`/api/sessions/${forId}/agent/${encodeURIComponent(agentId)}`);
+      return profile;
+    },
+    async whoami(forId) {
+      const { state } = await api<{
+        state: {
+          id: string;
+          name: string | null;
+          task: string;
+          status: string;
+          runtime: string;
+          channels: { id: string; name: string }[];
+          pendingAsks: { channelId: string; channelName: string; askId: string; question: string; fromSessionId: string | null }[];
+        };
+      }>(`/api/sessions/${forId}/whoami`);
+      return state;
     },
   };
 }

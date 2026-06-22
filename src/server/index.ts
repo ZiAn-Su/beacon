@@ -951,6 +951,41 @@ app.get('/api/sessions/:id/channel-inbox', (req: Request, res: Response) => {
   ok(res, { messages: store.channelInbox(id, after) });
 });
 
+// --- south (agent) PULL: acquire context, not just receive it ---
+// Full read of a channel the agent belongs to: roster (bios + status) + recent
+// history. Lets an agent orient in a group it just joined or returned to.
+app.get('/api/sessions/:id/read-channel', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const channelId = String(req.query.channel ?? '');
+  if (!store.getChannel(channelId)) return channelNotFound(res);
+  if (!store.isParticipant(channelId, id)) {
+    res.status(403).json({ error: 'not a participant of this channel' }); return;
+  }
+  const limit = Number(req.query.limit ?? 50) || 50;
+  ok(res, { detail: store.readChannelDetail(channelId, limit) });
+});
+
+// A peer agent's public profile (name, about, status) — decide who to ask.
+app.get('/api/sessions/:id/agent/:agentId', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  if (!store.getSession(id)) return notFound(res);
+  const profile = store.agentProfile(param(req, 'agentId'));
+  if (!profile) return notFound(res);
+  ok(res, { profile });
+});
+
+// The agent's own orientation: identity, channels, and group asks it could answer.
+app.get('/api/sessions/:id/whoami', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  const state = store.whoamiState(id);
+  if (!state) return notFound(res);
+  ok(res, { state });
+});
+
 // Image upload (north). Body { name?, mime, dataBase64 }. Returns the saved
 // upload with a serving url (for the UI thumbnail) and absolute path (handed to
 // the agent so it can read the file). The 28mb parser is scoped to this path.

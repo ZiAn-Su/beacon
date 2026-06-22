@@ -170,6 +170,21 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
     async channelInbox(id, after) {
       return store.channelInbox(id, after);
     },
+    async readChannel(forId, channelId, limit) {
+      if (!store.getChannel(channelId)) throw new Error('channel not found');
+      if (!store.isParticipant(channelId, forId)) {
+        throw new Error('not a participant of this channel');
+      }
+      return store.readChannelDetail(channelId, limit ?? 50) ?? null;
+    },
+    async getAgent(_forId, agentId) {
+      return store.agentProfile(agentId) ?? null;
+    },
+    async whoami(forId) {
+      const state = store.whoamiState(forId);
+      if (!state) throw new Error('session not found');
+      return state;
+    },
   };
 }
 

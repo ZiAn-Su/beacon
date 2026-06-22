@@ -198,6 +198,64 @@ try {
     const askId = args[1] ?? '';
     await api(`/api/sessions/${id}/channel-answer`, { channelId, askId, text: args.slice(2).join(' ') });
     console.log('answered the channel');
+  } else if (cmd === 'read-channel') {
+    const id = await ensureSession();
+    const channelId = args[0] ?? '';
+    const limit = args[1] ? Number(args[1]) : undefined;
+    const q = `channel=${encodeURIComponent(channelId)}${limit ? `&limit=${limit}` : ''}`;
+    const { detail } = await api(`/api/sessions/${id}/read-channel?${q}`);
+    if (!detail) {
+      console.log('channel not found');
+    } else {
+      const label = (sid) => {
+        if (!sid) return 'the human guardian';
+        const m = detail.members.find((x) => x.id === sid);
+        const n = (m && (m.name || m.task) || '').trim();
+        return n || `agent ${String(sid).slice(0, 8)}`;
+      };
+      const out = [`Channel #${detail.channel.name}  (id=${detail.channel.id})`, `Members (${detail.members.length}):`];
+      for (const m of detail.members) {
+        const nm = (m.name || m.task || '').trim() || `agent ${m.id.slice(0, 8)}`;
+        out.push(`  - ${nm} [${m.status}] (id=${m.id})${m.about && m.about.trim() ? ` — ${m.about.trim()}` : ''}`);
+      }
+      out.push('Recent messages:');
+      if (!detail.messages.length) out.push('  (no messages yet)');
+      for (const msg of detail.messages) {
+        const who = label(msg.fromSessionId);
+        if (msg.kind === 'ask' && msg.askId) out.push(`  ${who} ASKS: ${msg.text}  (answer-channel ${detail.channel.id} ${msg.askId} <text>)`);
+        else if (msg.kind === 'answer') out.push(`  ${who} answered: ${msg.text}`);
+        else out.push(`  ${who}: ${msg.text}`);
+      }
+      console.log(out.join('\n'));
+    }
+  } else if (cmd === 'agent') {
+    const id = await ensureSession();
+    const { profile: p } = await api(`/api/sessions/${id}/agent/${encodeURIComponent(args[0] ?? '')}`);
+    if (!p) {
+      console.log('no such agent');
+    } else {
+      const nm = (p.name || p.task || '').trim() || `agent ${p.id.slice(0, 8)}`;
+      const lines = [`${nm} [${p.status}]  (id=${p.id})`, `    runtime: ${p.runtime} · origin: ${p.origin}`];
+      if (p.task && p.task.trim()) lines.push(`    task: ${p.task.trim()}`);
+      if (p.about && p.about.trim()) lines.push(`    about: ${p.about.trim()}`);
+      console.log(lines.join('\n'));
+    }
+  } else if (cmd === 'whoami') {
+    const id = await ensureSession();
+    const { state: s } = await api(`/api/sessions/${id}/whoami`);
+    const nm = (s.name || s.task || '').trim() || `agent ${s.id.slice(0, 8)}`;
+    const out = [
+      `You are ${nm} [${s.status}]  (id=${s.id}, runtime ${s.runtime})`,
+      s.task && s.task.trim() ? `task: ${s.task.trim()}` : 'task: (none)',
+      s.channels.length ? `Channels (${s.channels.length}): ${s.channels.map((c) => `#${c.name} (${c.id})`).join(', ')}` : 'Channels: (none)',
+    ];
+    if (s.pendingAsks.length) {
+      out.push(`Group questions awaiting an answer (${s.pendingAsks.length}):`);
+      for (const a of s.pendingAsks) out.push(`  #${a.channelName}: ${a.question}  (answer-channel ${a.channelId} ${a.askId} <text>)`);
+    } else {
+      out.push('Group questions awaiting an answer: (none)');
+    }
+    console.log(out.join('\n'));
   } else if (cmd === 'agents') {
     const id = await ensureSession();
     const { agents } = await api(`/api/agents?visibleTo=${encodeURIComponent(id)}`);
@@ -257,7 +315,7 @@ try {
       }
     }
   } else {
-    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...] | channels | channel-post <channelId> <msg...> | ask-channel <channelId> <q> [opt...] | answer-channel <channelId> <askId> <ans...>>');
+    console.log('usage: node beacon.mjs <register [task] | name <name...> | about <text...> | notify <msg> | ask <question> [opt...] | status <s> | inbox | agents | agent <id> | whoami | notify-agent <id> <msg...> | ask-agent <id> <q> [opt...] | answer-agent <askId> <ans...> | spawn <workPath> [task...] | channels | channel-post <channelId> <msg...> | ask-channel <channelId> <q> [opt...] | answer-channel <channelId> <askId> <ans...> | read-channel <channelId> [limit]>');
     process.exit(1);
   }
 } catch (e) {

@@ -1697,3 +1697,132 @@ export function channelInbox(sessionId: string, after: number): ChannelInboxItem
   }
   return out.sort((a, b) => a.createdAt - b.createdAt);
 }
+
+// ---- agent-facing read aggregations (the "pull" tools) ----
+// Beacon's south surface was push/react only (notify, ask, inbox). These let an
+// agent PULL the context it needs: a channel's roster + history, a peer's
+// profile, and its own orientation. Pure reads; the caller enforces membership.
+
+export interface ChannelMember {
+  id: string;
+  name: string | null;
+  task: string;
+  about: string | null;
+  status: SessionStatus;
+  runtime: string;
+}
+export interface ChannelHistoryItem {
+  fromSessionId: string | null;
+  text: string;
+  kind: ChannelMsgKind;
+  askId: string | null;
+  createdAt: number;
+}
+export interface ChannelDetail {
+  channel: { id: string; name: string };
+  members: ChannelMember[];
+  messages: ChannelHistoryItem[];
+}
+
+/** Roster (with bios + status) and the last `limit` messages of a channel, so an
+ *  agent dropped into a group can orient: what is this, who is here, what was said. */
+export function readChannelDetail(channelId: string, limit = 50): ChannelDetail | undefined {
+  const c = getChannel(channelId);
+  if (!c) return undefined;
+  const members: ChannelMember[] = listParticipants(channelId).map((sid) => {
+    const s = getSession(sid);
+    return {
+      id: sid,
+      name: s?.title ?? null,
+      task: s?.task ?? '',
+      about: s?.description ?? null,
+      status: (s?.status ?? 'registered') as SessionStatus,
+      runtime: s?.runtime ?? 'unknown',
+    };
+  });
+  const cap = Math.max(1, Math.min(limit, 200));
+  const messages: ChannelHistoryItem[] = channelMessages(channelId)
+    .slice(-cap)
+    .map((m) => ({
+      fromSessionId: m.fromSessionId,
+      text: m.text,
+      kind: m.kind,
+      askId: m.askId,
+      createdAt: m.createdAt,
+    }));
+  return { channel: { id: c.id, name: c.name }, members, messages };
+}
+
+export interface AgentProfile {
+  id: string;
+  name: string | null;
+  task: string;
+  about: string | null;
+  status: SessionStatus;
+  runtime: string;
+  origin: string;
+}
+/** A peer's public profile so an agent can decide who to ask before spending an ask. */
+export function agentProfile(id: string): AgentProfile | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  return {
+    id: s.id,
+    name: s.title ?? null,
+    task: s.task,
+    about: s.description ?? null,
+    status: s.status,
+    runtime: s.runtime,
+    origin: s.origin,
+  };
+}
+
+export interface WhoamiPendingAsk {
+  channelId: string;
+  channelName: string;
+  askId: string;
+  question: string;
+  fromSessionId: string | null;
+}
+export interface WhoamiState {
+  id: string;
+  name: string | null;
+  task: string;
+  status: SessionStatus;
+  runtime: string;
+  channels: { id: string; name: string }[];
+  pendingAsks: WhoamiPendingAsk[];
+}
+/** An agent's own orientation: identity, the channels it is in, and group asks
+ *  still awaiting an answer it could field (pending, posted by someone else). */
+export function whoamiState(id: string): WhoamiState | undefined {
+  const s = getSession(id);
+  if (!s) return undefined;
+  const channels = channelsForSession(id);
+  const pendingAsks: WhoamiPendingAsk[] = [];
+  for (const c of channels) {
+    for (const m of channelMessages(c.id)) {
+      if (m.kind !== 'ask' || !m.askId) continue;
+      if (m.fromSessionId === id) continue; // my own ask — I'm the one waiting
+      const ask = getAsk(m.askId);
+      if (ask && ask.status === 'pending') {
+        pendingAsks.push({
+          channelId: c.id,
+          channelName: c.name,
+          askId: m.askId,
+          question: m.text,
+          fromSessionId: m.fromSessionId,
+        });
+      }
+    }
+  }
+  return {
+    id: s.id,
+    name: s.title ?? null,
+    task: s.task,
+    status: s.status,
+    runtime: s.runtime,
+    channels: channels.map((c) => ({ id: c.id, name: c.name })),
+    pendingAsks,
+  };
+}
