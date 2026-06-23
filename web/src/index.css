@@ -204,6 +204,65 @@ body {
   flex: none;
 }
 
+/* ---------------------------------------------------------------------------
+   Markdown message bodies (chat + channel bubbles). Text color is inherited
+   from the bubble; code / quotes / borders adapt to light surfaces by default
+   and to the white-on-accent ("mine") bubble via .md-on-accent.
+   --------------------------------------------------------------------------- */
+.md-body { color: inherit; line-height: 1.55; overflow-wrap: anywhere; }
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+.md-body p { margin: 0 0 0.5em; }
+.md-body ul, .md-body ol { margin: 0.4em 0; padding-left: 1.4em; }
+.md-body li { margin: 0.15em 0; }
+.md-body li > ul, .md-body li > ol { margin: 0.1em 0; }
+.md-body a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.md-body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 0.1em 0.34em;
+  border-radius: 5px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+}
+.md-body pre {
+  margin: 0.5em 0;
+  padding: 0.7em 0.85em;
+  border-radius: 10px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  overflow-x: auto;
+}
+.md-body pre code { background: none; border: none; padding: 0; font-size: 0.86em; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  margin: 0.6em 0 0.3em; font-weight: 650; line-height: 1.3;
+}
+.md-body h1 { font-size: 1.18em; }
+.md-body h2 { font-size: 1.1em; }
+.md-body h3 { font-size: 1.02em; }
+.md-body blockquote {
+  margin: 0.5em 0; padding: 0.1em 0.9em;
+  border-left: 3px solid var(--border-strong); color: var(--text-secondary);
+}
+.md-body hr { margin: 0.7em 0; border: 0; border-top: 1px solid var(--border); }
+.md-body table {
+  border-collapse: collapse; margin: 0.5em 0; font-size: 0.95em;
+  display: block; overflow-x: auto;
+}
+.md-body th, .md-body td { border: 1px solid var(--border); padding: 0.3em 0.55em; text-align: left; }
+.md-body strong { font-weight: 650; }
+.md-body img { max-width: 100%; border-radius: 8px; }
+
+.md-on-accent code,
+.md-on-accent pre {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+.md-on-accent blockquote { border-left-color: rgba(255, 255, 255, 0.5); color: rgba(255, 255, 255, 0.85); }
+.md-on-accent a { text-decoration-color: rgba(255, 255, 255, 0.7); }
+.md-on-accent hr { border-top-color: rgba(255, 255, 255, 0.3); }
+.md-on-accent th, .md-on-accent td { border-color: rgba(255, 255, 255, 0.3); }
+
 /* Subtle working pulse for the status dot. */
 .working-dot {
   background: var(--color-working);

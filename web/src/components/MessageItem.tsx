@@ -4,6 +4,7 @@ import { absoluteTime, shortTime } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 import { useStore } from "../lib/store";
 import { AskCard } from "./AskCard";
+import { Markdown } from "./Markdown";
 
 interface Props {
   message: Message;
@@ -84,11 +85,10 @@ export function MessageItem({
               color: "var(--text)",
               border: "1px solid var(--border)",
               animation: "msg-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both",
-              whiteSpace: "pre-wrap",
               wordBreak: "break-word",
             }}
           >
-            {message.text}
+            <Markdown text={message.text} />
           </div>
           {isLast && <Timestamp time={message.createdAt} />}
         </div>
@@ -130,11 +130,10 @@ export function MessageItem({
             background: "var(--accent)",
             color: "#fff",
             animation: "msg-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both",
-            whiteSpace: "pre-wrap",
             wordBreak: "break-word",
           }}
         >
-          {message.text}
+          <Markdown text={message.text} onAccent />
         </div>
         )}
         <div className="flex items-center gap-1">
@@ -206,11 +205,8 @@ function NotifyBubble({ text, ts }: { text: string; ts: number }) {
       >
         <Bell size={9} />
       </span>
-      <span
-        className="min-w-0 flex-1"
-        style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}
-      >
-        {text}
+      <span className="min-w-0 flex-1" style={{ wordBreak: "break-word", color: "var(--text)" }}>
+        <Markdown text={text} />
       </span>
       <time
         dateTime={new Date(ts).toISOString()}
@@ -281,11 +277,8 @@ function PeerBubble({
               </span>
             )}
           </span>
-          <span
-            className="mt-1 block"
-            style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text)" }}
-          >
-            {text}
+          <span className="mt-1 block" style={{ wordBreak: "break-word", color: "var(--text)" }}>
+            <Markdown text={text} />
           </span>
         </span>
         <time

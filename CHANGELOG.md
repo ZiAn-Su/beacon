@@ -3,6 +3,15 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.9.1] - 2026-06-23
+
+### 新增 —— 消息支持 Markdown 渲染
+
+私聊与群聊的消息正文此前是纯文本,agent 常用的 `**加粗**`、代码块、列表、链接全显示成字面符号。现在统一经
+共享 `<Markdown>` 组件渲染(`react-markdown` + GFM 表格/删除线 + 单换行即换行),覆盖所有气泡(agent /
+人 / notify / peer / 群聊)。默认不渲染裸 HTML(XSS 安全);代码/引用/边框在浅色气泡与 accent 白字气泡两种
+语境下都可读;链接新标签打开且 `rel=noopener`。
+
 ## [0.9.0] - 2026-06-23
 
 ### 新增 —— agent 自组织 + 编排可观测 + spawn 可控

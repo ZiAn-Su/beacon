@@ -27,6 +27,7 @@ import { isOnline } from "../lib/format";
 import { Avatar } from "./Avatar";
 import { EmptyState } from "./EmptyState";
 import { CreateChannelModal } from "./CreateChannelModal";
+import { Markdown } from "./Markdown";
 
 const STATUS_COLOR: Record<Session["status"], string> = {
   registered: "var(--color-registered)",
@@ -569,7 +570,7 @@ function ChannelThread({
                       <span>{rel(m.createdAt, now)}</span>
                     </div>
                     <div
-                      className="whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed"
+                      className="break-words rounded-2xl px-3.5 py-2 text-[14px] leading-relaxed"
                       style={
                         mine
                           ? { background: "var(--accent)", color: "#fff" }
@@ -586,7 +587,7 @@ function ChannelThread({
                               }
                       }
                     >
-                      {m.text}
+                      <Markdown text={m.text} onAccent={mine} />
                     </div>
                     {isAsk && !mine && (
                       <div className={"mt-1 flex " + (mine ? "justify-end" : "justify-start")}>
