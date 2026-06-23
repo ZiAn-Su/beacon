@@ -3,6 +3,22 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.10.0] - 2026-06-23
+
+### 变更 —— agent↔agent 通信收进「配对频道」,不再散落私聊
+
+概念修正(董事会主席提出):私聊 = 监护人 + 1 个对象(2 方);两个智能体之间的通信本质隐含监护人在场 =
+3 方 = 应当是群聊。此前 `notify_agent` / `ask_agent` 的往来以 `kind='peer'` 消息落在各 agent 的 1:1 线程里,
+监护人得分别开两个私聊才看得全。
+
+现在 agent↔agent 自动走一个**配对频道**(`ensurePairChannel`:参与方恰为这两个 agent,监护人如所有频道一样
+始终在场,按名复用)。`peerNotify` → 频道定向消息;`peerAsk` → 频道 ask;`agentAnswer` → 频道 answer。
+**阻塞契约不变**(复用 `createChannelAsk`/`answerChannelAsk` 的同一套 ask/长轮询机制)。对人:agent↔agent
+呈现为干净的 3 方群,私聊回归「监护人 ↔ 单个 agent」。对 agent:`notify_agent`/`ask_agent`/`answer_agent`
+工具签名不变(`answer_agent` 仍可用,自动按 ask 解析频道),且现在会扇出到接收方终端(此前仅靠轮询 inbox)。
+
+新增 6 个单元测试覆盖配对频道路由与阻塞契约。纯后端改动,无前端重建。
+
 ## [0.9.2] - 2026-06-23
 
 ### 修复 —— 冷启动的智能体:消息卡在输入框、没自动回车

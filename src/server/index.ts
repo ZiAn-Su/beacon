@@ -248,7 +248,10 @@ app.post('/api/sessions/:id/peer-notify', (req: Request, res: Response) => {
   if (!peerAuthOk(res, param(req, 'id'), targetId)) return;
   store.touchSeen(param(req, 'id'));
   try {
+    // Agent<->agent now flows through the pair channel; fan the post out to the
+    // recipient's terminal (and the UI) like any channel message.
     const message = store.peerNotify(param(req, 'id'), targetId, text);
+    fanOutChannelMessage(message);
     ok(res, { message });
   } catch {
     notFound(res);
@@ -271,7 +274,8 @@ app.post('/api/sessions/:id/peer-ask', (req: Request, res: Response) => {
     ? req.body.options.map(String)
     : null;
   try {
-    const ask = store.peerAsk(param(req, 'id'), targetId, String(req.body.question), options);
+    const { ask, message } = store.peerAsk(param(req, 'id'), targetId, String(req.body.question), options);
+    fanOutChannelMessage(message);
     ok(res, { askId: ask.id });
   } catch {
     notFound(res);
@@ -289,7 +293,8 @@ app.post('/api/sessions/:id/peer-reply', (req: Request, res: Response) => {
   if (!existing) { res.status(404).json({ error: 'ask not found' }); return; }
   if (existing.status !== 'pending') { res.status(409).json({ error: 'ask not pending' }); return; }
   store.touchSeen(param(req, 'id'));
-  store.agentAnswer(askId, text, param(req, 'id'));
+  const answerMsg = store.agentAnswer(askId, text, param(req, 'id'));
+  if (answerMsg) fanOutChannelMessage(answerMsg);
   ok(res, { ok: true });
 });
 

@@ -887,90 +887,50 @@ export function cancelAsk(askId: string): Ask | undefined {
  * Non-blocking agent->agent FYI. Both sessions must exist (else throws, gateway
  * maps to 404). Returns the message (addMessage already emits + touches toId).
  */
-export function peerNotify(fromId: string, toId: string, text: string): Message {
+export function peerNotify(fromId: string, toId: string, text: string): ChannelMessage {
   if (!getSession(fromId)) throw new Error('session not found');
   if (!getSession(toId)) throw new Error('session not found');
-  return addMessage({
-    sessionId: toId,
-    fromSessionId: fromId,
-    direction: 'agent',
-    kind: 'peer',
-    text,
-  });
+  // Agent<->agent is a supervised 3-party exchange, so it lives in the pair
+  // channel (guardian present) rather than muddled into each agent's 1:1 DM.
+  // Directed at the recipient so it is still clearly "for them" in the group.
+  const ch = ensurePairChannel(fromId, toId);
+  return postChannelMessage(ch.id, fromId, text, { toSessionId: toId });
 }
 
 /**
- * Blocking agent->agent question. The ask belongs to the *asker* (fromId) — it
- * is the one that blocks and long-polls. We INSERT the ask row directly rather
- * than via createAsk(), because createAsk surfaces the question as an
- * agent->human ask on the asker's own thread; here the question must instead be
- * delivered as a peer message to the recipient.
+ * Blocking agent->agent question, in the pair channel and directed at the
+ * recipient. Reuses the channel-ask machinery, so the asker blocks/long-polls on
+ * the returned ask exactly as before (createChannelAsk inserts the ask with
+ * sessionId=asker, sets it waiting, and flushWaiters unblocks it on answer). The
+ * exchange surfaces as a supervised 3-party group, not in either agent's DM.
  */
 export function peerAsk(
   fromId: string,
   toId: string,
   question: string,
   options: string[] | null
-): Ask {
+): { ask: Ask; message: ChannelMessage } {
   if (!getSession(fromId)) throw new Error('session not found');
   if (!getSession(toId)) throw new Error('session not found');
-  const ask: Ask = {
-    id: randomUUID(),
-    sessionId: fromId,
-    question,
-    options,
-    status: 'pending',
-    answer: null,
-    createdAt: now(),
-    answeredAt: null,
-  };
-  insertAsk.run({
-    ...ask,
-    options: ask.options ? JSON.stringify(ask.options) : null,
-  });
-  setStatus(fromId, 'waiting');
-  // Deliver the question to the recipient as a peer message carrying the askId.
-  addMessage({
-    sessionId: toId,
-    fromSessionId: fromId,
-    direction: 'agent',
-    kind: 'peer',
-    text: question,
-    askId: ask.id,
-    meta: options ? { options } : null,
-  });
-  return ask;
+  const ch = ensurePairChannel(fromId, toId);
+  return createChannelAsk(ch.id, fromId, question, options, toId);
 }
 
 /**
- * The recipient answers a peer-ask, unblocking the asker's long-poll. If the
- * ask is missing or no longer pending, returns it unchanged (gateway maps to
- * 404/409). The answer is posted back as a peer message on the asker's thread.
+ * The recipient answers a peer-ask, unblocking the asker's long-poll. The peer
+ * ask now lives as a channel ask in the pair channel, so route the answer there
+ * (answerChannelAsk resolves the ask, posts the answer, and flushWaiters unblocks
+ * the asker). Returns the posted channel message (for fan-out), or undefined when
+ * the ask can't be located.
  */
 export function agentAnswer(
   askId: string,
   text: string,
   fromId?: string | null
-): Ask | undefined {
-  const ask = getAsk(askId);
-  if (!ask || ask.status !== 'pending') return ask;
-  // The answer is carried on the asker's thread (ask.sessionId = asker). Its
-  // fromSessionId points back at the answerer (the recipient of the question),
-  // so the asker's messages() shows the answer attributed to that peer.
-  addMessage({
-    sessionId: ask.sessionId,
-    fromSessionId: fromId ?? null,
-    direction: 'agent',
-    kind: 'peer',
-    text,
-    askId,
-  });
-  updateAskAnswer.run({ id: askId, answer: text, answeredAt: now() });
-  const askerId = ask.sessionId;
-  const session = getSession(askerId);
-  if (session && session.status === 'waiting') setStatus(askerId, 'working');
-  flushWaiters(getAsk(askId)!);
-  return getAsk(askId);
+): ChannelMessage | undefined {
+  const channelId = getChannelIdForAsk(askId);
+  if (!channelId) return undefined;
+  return answerChannelAsk(channelId, askId, fromId ?? null, text);
 }
 
 // ---------- grants (per-pair authorization) ----------
@@ -1632,6 +1592,35 @@ export function channelsForSession(sessionId: string): Channel[] {
     (r) => r.channelId,
   );
   return ids.map((id) => getChannel(id)).filter((c): c is Channel => !!c);
+}
+
+/**
+ * The pair channel for two agents: the channel whose agent participants are
+ * EXACTLY those two. Agent<->agent is a supervised 3-party exchange (the two
+ * agents + the guardian, who is present in every channel), so it belongs in a
+ * group, not muddled into either agent's 1:1 DM. Found by exact participant set,
+ * else created (named after the two agents). Reused for all their later traffic.
+ */
+export function ensurePairChannel(a: string, b: string): Channel {
+  for (const c of channelsForSession(a)) {
+    const parts = listParticipants(c.id);
+    if (parts.length === 2 && parts.includes(a) && parts.includes(b)) return c;
+  }
+  const label = (s: ReturnType<typeof getSession>, id: string) =>
+    (s?.title || s?.task || id.slice(0, 6)).trim() || id.slice(0, 6);
+  const ch = createChannel(`${label(getSession(a), a)} & ${label(getSession(b), b)}`);
+  addParticipant(ch.id, a);
+  addParticipant(ch.id, b);
+  return ch;
+}
+
+const selectChannelIdForAsk = db.prepare(
+  `SELECT channelId FROM channel_messages WHERE askId = ? AND kind = 'ask' LIMIT 1`,
+);
+/** The channel a channel-ask was posted in, so its answer can be routed there. */
+function getChannelIdForAsk(askId: string): string | null {
+  const r = selectChannelIdForAsk.get(askId) as { channelId: string } | undefined;
+  return r?.channelId ?? null;
 }
 
 /**

@@ -399,7 +399,9 @@ export function registerBeaconTools(
     {
       title: 'Notify another agent (non-blocking)',
       description:
-        'Send another agent an FYI and keep working. Does not block. Use agent_id from list_agents.',
+        'Send another agent an FYI and keep working. Does not block. Use agent_id from list_agents. ' +
+        'The exchange happens in a shared space the two of you and your human guardian can all see ' +
+        '(agent-to-agent is always supervised) — it is not a private channel.',
       inputSchema: {
         agent_id: z.string().describe('Target agent session id (from list_agents)'),
         message: z.string().describe('The message to send to that agent'),
@@ -427,7 +429,9 @@ export function registerBeaconTools(
       title: 'Ask another agent and wait for an answer',
       description:
         'Ask another agent a question and BLOCK until they reply, then return their answer. ' +
-        'Use agent_id from list_agents. Provide options for a quick decision when applicable.',
+        'Use agent_id from list_agents. Provide options for a quick decision when applicable. ' +
+        'The exchange happens in a shared space the two of you and your human guardian can all see ' +
+        '(agent-to-agent is always supervised) — it is not a private channel.',
       inputSchema: {
         agent_id: z.string().describe('Target agent session id (from list_agents)'),
         question: z.string().describe('The question to ask the other agent'),

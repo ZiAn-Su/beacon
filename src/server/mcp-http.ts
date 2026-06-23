@@ -103,7 +103,8 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
             : 'not authorized to contact this agent',
         );
       }
-      store.peerNotify(fromId, targetId, text);
+      // Routes through the pair channel; fan out to the recipient's terminal + UI.
+      fanOutChannelMessage(store.peerNotify(fromId, targetId, text));
     },
     async peerAsk(fromId, targetId, question, options) {
       const v = store.resolvePeerPermission(fromId, targetId);
@@ -114,11 +115,13 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
             : 'not authorized to contact this agent',
         );
       }
-      const a = store.peerAsk(fromId, targetId, question, options ?? null);
-      return { askId: a.id };
+      const { ask, message } = store.peerAsk(fromId, targetId, question, options ?? null);
+      fanOutChannelMessage(message);
+      return { askId: ask.id };
     },
     async peerReply(answererId, askId, text) {
-      store.agentAnswer(askId, text, answererId);
+      const msg = store.agentAnswer(askId, text, answererId);
+      if (msg) fanOutChannelMessage(msg);
     },
     async requestContact(fromId, targetId, reason) {
       const v = store.resolvePeerPermission(fromId, targetId);
