@@ -22,7 +22,7 @@ import {
   isEffect,
 } from '../core/permissions';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission, setSpawnAllowedTools } from './pty';
 import { fanOutChannelMessage } from './channel-delivery';
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
@@ -383,9 +383,12 @@ function spawnAgent(params: {
   // authorization) and an optional channel for the child to auto-join on launch.
   spawnerId?: string | null;
   channelId?: string | null;
-  // Optional permission mode override (bypassPermissions / acceptEdits / default / plan).
-  // If omitted, uses the global settings.startPermission.
+  // Optional permission mode override (bypassPermissions / acceptEdits / default /
+  // plan / auto / dontAsk). If omitted, uses the global settings.startPermission.
   permissionMode?: string | null;
+  // Optional pre-approved tools (-> claude --allowedTools), e.g. ["Bash(ffmpeg *)",
+  // "Read"], so the agent can run those without a per-call permission prompt.
+  allowedTools?: string[] | null;
 }) {
   const session = store.createSession({
     runtime: params.runtime || 'claude-code',
@@ -411,6 +414,11 @@ function spawnAgent(params: {
   // (overrides the global default).
   if (params.permissionMode?.trim()) {
     setSpawnPermission(session.id, params.permissionMode.trim());
+  }
+  // Pre-approved tools for this spawn (e.g. so a QA agent can run ffmpeg/bash
+  // without per-command prompts). Sanitized in pty.ts before reaching the shell.
+  if (params.allowedTools && params.allowedTools.length) {
+    setSpawnAllowedTools(session.id, params.allowedTools.map(String));
   }
   const launched = ensurePty(session.id);
   // Hand the agent its task so it actually starts working. writeToPty queues
@@ -561,6 +569,7 @@ app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
     task: body.task != null ? String(body.task) : null,
     channelId: body.channelId != null ? String(body.channelId) : null,
     permissionMode: body.permissionMode != null ? String(body.permissionMode) : null,
+    allowedTools: Array.isArray(body.allowedTools) ? body.allowedTools.map(String) : null,
   };
   store.touchSeen(id);
   const verdict = store.resolveCapability(id, 'spawn_agent');

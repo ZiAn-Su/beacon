@@ -3,6 +3,21 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.10.1] - 2026-06-23
+
+### 新增 —— spawn 可预批命令(`allowed_tools`):自主跑命令的 agent 不再逐条卡权限
+
+客户(丈布)压测暴露的缺口:要跑命令的 agent(如质检 agent 跑 ffmpeg 抽帧 + bash 核验)没有一档「预批命令
+执行、又不卡启动」的权限模式 —— `acceptEdits` 只批文件编辑不批命令,`bypassPermissions` 又卡启动风险确认。
+
+`spawn_agent` 新增可选 `allowed_tools`(映射 claude 原生 `--allowedTools`):传入要预批的工具/命令前缀
+(如 `["Bash(ffmpeg *)", "Bash(git *)", "Read", "Write"]`),子 agent 跑这些不再逐条问、也不用 bypass、
+不卡启动。这是让自主 agent 无人值守跑命令的安全、细粒度做法。`permission_mode` 也补全了 `auto`/`dontAsk` 两档。
+
+**安全:** `allowed_tools` 的值会被插进启动命令字符串,故经 `sanitizeAllowedTools` 严格过滤 —— 只保留工具名
+字符(字母/数字/`_().*:/ ,-`),凡含 shell 元字符(`; | & $ \` " ' < >` 等)的条目一律丢弃,杜绝命令注入。
+5 个注入防护单测覆盖。
+
 ## [0.10.0] - 2026-06-23
 
 ### 变更 —— agent↔agent 通信收进「配对频道」,不再散落私聊

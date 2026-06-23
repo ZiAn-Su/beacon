@@ -23,7 +23,7 @@ import { getSettings } from '../core/settings';
 // bypassPermissions) — otherwise it stalls on a "Do you want to proceed?" prompt
 // for every tool call, invisibly to the human on Beacon. wake.ts already passes
 // this for relaunch; the PTY launch must too.
-const CLAUDE_PERM_MODES = ['bypassPermissions', 'acceptEdits', 'default', 'plan'];
+const CLAUDE_PERM_MODES = ['bypassPermissions', 'acceptEdits', 'default', 'plan', 'auto', 'dontAsk'];
 function permFlag(): string {
   const m = getSettings().startPermission;
   return CLAUDE_PERM_MODES.includes(m) ? ` --permission-mode ${m}` : '';
@@ -42,6 +42,35 @@ function takeSpawnPerm(sessionId: string): string {
   return mode && CLAUDE_PERM_MODES.includes(mode)
     ? ` --permission-mode ${mode}`
     : permFlag();
+}
+
+// Per-spawn pre-approved tools: maps to claude's `--allowedTools` so a spawned
+// agent can run specific tools / command prefixes (e.g. "Bash(ffmpeg *)", "Read")
+// without a per-call permission prompt AND without the bypassPermissions startup
+// confirmation — the granular middle ground for autonomous agents that must run
+// commands. Sanitized hard because the value is interpolated into the launch
+// command string: only tool-name characters survive, so no shell injection.
+const spawnAllowedTools = new Map<string, string>();
+export function sanitizeAllowedTools(tools: string[]): string {
+  return tools
+    .map((t) => String(t).trim())
+    // Allow tool names + simple arg patterns: letters, digits, _ ( ) . * : / space - ,
+    // Reject anything with shell metacharacters (; | & $ ` " ' < > etc.).
+    .filter((t) => t.length > 0 && /^[A-Za-z0-9_().*:/ ,-]+$/.test(t))
+    .join(' ')
+    .slice(0, 800)
+    .trim();
+}
+export function setSpawnAllowedTools(sessionId: string, tools: string[]): void {
+  const safe = sanitizeAllowedTools(tools);
+  if (safe) spawnAllowedTools.set(sessionId, safe);
+}
+function takeSpawnAllowedTools(sessionId: string): string {
+  const tools = spawnAllowedTools.get(sessionId);
+  spawnAllowedTools.delete(sessionId);
+  // Value is sanitized (no quotes/metachars), so double-quoting is safe in both
+  // cmd.exe and bash.
+  return tools ? ` --allowedTools "${tools}"` : '';
 }
 
 const isWin = process.platform === 'win32';
@@ -249,7 +278,9 @@ function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boo
       ? { file: 'cmd.exe', args: ['/k', cmd] }
       : { file: process.env.SHELL ?? 'bash', args: ['-c', `exec ${cmd}`] };
 
-  const perm = takeSpawnPerm(sessionId); // per-spawn override or global default
+  // Per-spawn flags: permission mode + pre-approved tools (--allowedTools). Both
+  // are consumed (cleared) here, so they only apply to this one launch.
+  const perm = takeSpawnPerm(sessionId) + takeSpawnAllowedTools(sessionId);
   if (runtime === 'claude-code' || runtime === 'claude') {
     // Fresh launch -> a new conversation. Otherwise resume the EXACT conversation
     // when the platform knows its native id; else the most recent in the work dir.

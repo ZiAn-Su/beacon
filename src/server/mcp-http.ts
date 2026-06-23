@@ -27,6 +27,8 @@ type SpawnFn = (
     name?: string | null;
     task?: string | null;
     channelId?: string | null;
+    permissionMode?: string | null;
+    allowedTools?: string[] | null;
   },
   spawnerId: string,
 ) => { session: { id: string } };
@@ -139,6 +141,8 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
         name: params.name ?? null,
         task: params.task ?? null,
         channelId: params.channelId ?? null,
+        permissionMode: params.permissionMode ?? null,
+        allowedTools: params.allowedTools ?? null,
       };
       if (v === 'ask') {
         const askId = store.createSpawnRequest(spawnerId, p);

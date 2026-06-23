@@ -64,6 +64,7 @@ export interface AgentOps {
       task?: string | null;
       channelId?: string | null;
       permissionMode?: string | null;
+      allowedTools?: string[] | null;
     },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
   // Group channels: a channel fans a message out to all its members (other
@@ -557,14 +558,24 @@ export function registerBeaconTools(
           .string()
           .optional()
           .describe(
-            'Optional permission mode for the spawned agent: "bypassPermissions" (no prompts), ' +
-            '"acceptEdits" (auto-accept file edits), "default" (ask each time), or "plan" (plan mode). ' +
-            'If omitted, uses the platform\'s global default. Use "bypassPermissions" to avoid interactive ' +
-            'permission prompts that would stall the agent at startup.',
+            'Optional permission mode for the spawned agent: "acceptEdits" (auto-accept file edits, ' +
+            'ask for commands), "default" (ask each time), "plan" (plan mode), "dontAsk"/"auto", or ' +
+            '"bypassPermissions" (no prompts, but shows a one-time interactive risk confirmation at ' +
+            'startup that can stall the agent — prefer acceptEdits + allowed_tools instead). If omitted, ' +
+            'uses the platform\'s global default.',
+          ),
+        allowed_tools: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Optional list of tools / command prefixes the spawned agent may run WITHOUT a per-call ' +
+            'permission prompt, e.g. ["Bash(ffmpeg *)", "Bash(git *)", "Read", "Write"]. This is the ' +
+            'safe, granular way to let an autonomous agent (e.g. a QA agent that must run commands) ' +
+            'work unattended without bypassPermissions and without stalling on prompts.',
           ),
       },
     },
-    async ({ work_path, runtime, name, task, channel_id, permission_mode }) => {
+    async ({ work_path, runtime, name, task, channel_id, permission_mode, allowed_tools }) => {
       const id = await ensure();
       const r = await ops.spawn(id, {
         workPath: work_path,
@@ -573,6 +584,7 @@ export function registerBeaconTools(
         task,
         channelId: channel_id,
         permissionMode: permission_mode,
+        allowedTools: allowed_tools,
       });
       if (r.status === 'spawned') {
         return {
@@ -1194,6 +1206,7 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
             task: params.task ?? null,
             channelId: params.channelId ?? null,
             permissionMode: params.permissionMode ?? null,
+            allowedTools: params.allowedTools ?? null,
           }),
         },
       );
