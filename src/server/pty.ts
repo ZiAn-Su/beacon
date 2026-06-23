@@ -192,6 +192,25 @@ function submit(entry: LivePty, oneLine: string): void {
   } catch { /* exited */ }
 }
 
+// Submit a message that was queued during a COLD spawn. At BOOT_MS the TUI
+// composer frequently shows the typed text but is not yet ready to SUBMIT it:
+// a single Enter can land as a paste-confirm / newline instead of a send, so the
+// message sits in the input box and the human has to press Enter in the terminal
+// themselves (the reported bug). After writing the text once, retry Enter a few
+// times as the composer settles. A stray Enter on an empty / already-submitted
+// composer is a no-op in claude, so the retries are safe; they only ever turn a
+// stuck-in-the-box message into a sent one.
+function submitCold(entry: LivePty, oneLine: string): void {
+  try {
+    entry.proc.write(oneLine);
+  } catch { return; /* exited */ }
+  for (const delay of [150, 1100, 2400]) {
+    setTimeout(() => {
+      try { entry.proc.write('\r'); } catch { /* exited */ }
+    }, delay);
+  }
+}
+
 /**
  * Deliver a human message into the session's terminal as if typed into the
  * agent, then submit it (Enter). Spawns the terminal on demand if none exists.
@@ -303,13 +322,16 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
   };
   live.set(sessionId, entry);
 
-  // Flush any messages queued while the TUI was booting, once it's ready.
+  // Flush any messages queued while the TUI was booting, once it's ready. Use
+  // the cold-start submit (retries Enter as the composer settles) since this is
+  // exactly the just-spawned case where a single Enter often fails to send. Space
+  // multiple queued messages so their submits don't interleave.
   setTimeout(() => {
     const e = live.get(sessionId);
     if (!e) return;
     const queued = e.pending;
     e.pending = [];
-    for (const line of queued) submit(e, line);
+    queued.forEach((line, i) => setTimeout(() => submitCold(e, line), i * 2800));
   }, BOOT_MS);
 
   // While a terminal is open, keep the session's presence "online" — the
