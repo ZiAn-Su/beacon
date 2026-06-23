@@ -3,6 +3,32 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.9.0] - 2026-06-23
+
+### 新增 —— agent 自组织 + 编排可观测 + spawn 可控
+
+由首个真实客户(全 AI 公司)实战反馈驱动:
+
+- **频道自组织**:新增 `create_channel`(agent 自建频道,人类 owner 始终在场)、`add_to_channel`
+  (把 agent 加进所在频道,与直接联系同权)。`spawn_agent` 加可选 `channel_id`(新 agent 启动即入群);
+  spawn 出的子 agent 与 spawner **自动互授联系权**,CEO 才能编组自己拉起的团队。多智能体协作不再依赖
+  人类手动建群。
+- **子 agent 可观测**:`get_agent` 增加 `lastSeenAt`(在线心跳)+ `lastActivity`(最近一次活动,跨
+  1:1 与频道取最新一条,仅对有权联系者给内容)。把糊掉的 `idle` 拆成「在跑/刚停/做完/掉线」,
+  编排子 agent 时 poll 它即可,不必干等它 post。
+- **spawn 权限模式**:`spawn_agent` 加可选 `permission_mode`(bypassPermissions / acceptEdits /
+  default / plan),跳过启动时的权限确认提示。
+
+### 修复
+
+- **账号/额度限制可见**:agent 的 claude 进程撞上账号花费上限(402 Daily spending limit)或额度耗尽时,
+  Beacon 此前静默、消息凭空消失。现在 `LIMIT_GATE` 覆盖花费/额度措辞 + 进程意外退出会发 notify 并置
+  idle,告知「换账号后重启该 agent」。
+- **频道列表成员数显示 0**:频道列表此前只在选中某频道时才加载其成员,未点击的频道恒显示「0 个智能体」。
+  现在初始加载即用列表接口已返回的 participants 填充所有频道的成员数,成员变更经 WS 刷新。
+- **未注册先 notify/ask 报 400**:`ensure()` 在无 task 时给占位 task,兑现「先 notify/ask 自动建
+  session」的文档承诺。
+
 ## [0.8.0] - 2026-06-22
 
 ### 新增 —— 群聊成体系 + agent 可主动拉取上下文

@@ -296,16 +296,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           next[idx] = ch;
           return next;
         });
-        // create/rename/membership all emit this; refresh participants if loaded.
-        if (loadedChannelsRef.current.has(ch.id)) {
-          getChannelApi(ch.id)
-            .then((d) =>
-              setChannelParticipants((p) => ({ ...p, [ch.id]: d.participants })),
-            )
-            .catch(() => {
-              /* ignore */
-            });
-        }
+        // create/rename/membership all emit this. Refresh participant counts for
+        // ALL channels from the (lightweight, message-free) list endpoint, so the
+        // list shows correct member counts even for channels never opened.
+        listChannels()
+          .then((list) =>
+            setChannelParticipants((p) => {
+              const next = { ...p };
+              for (const c of list) next[c.id] = c.participants;
+              return next;
+            }),
+          )
+          .catch(() => {
+            /* ignore */
+          });
         break;
       }
       case "channel-removed": {
@@ -411,10 +415,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // Initial channel roster (WS keeps it live afterwards).
+  // Initial channel roster (WS keeps it live afterwards). The list endpoint
+  // returns each channel's participants, so seed the member counts for ALL
+  // channels here — otherwise the list shows "0 members" until a channel is
+  // opened (which is the only thing that used to populate channelParticipants).
   useEffect(() => {
     listChannels()
-      .then(setChannels)
+      .then((list) => {
+        setChannels(list.map((c) => ({ id: c.id, name: c.name, createdAt: c.createdAt })));
+        setChannelParticipants((prev) => {
+          const next = { ...prev };
+          for (const c of list) next[c.id] = c.participants;
+          return next;
+        });
+      })
       .catch(() => {
         /* backend may be down */
       });

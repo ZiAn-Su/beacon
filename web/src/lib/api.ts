@@ -392,9 +392,14 @@ export async function getConnectInfo(): Promise<ConnectInfo> {
 
 // ---- group channels (north / owner side) ----
 
-export async function listChannels(): Promise<Channel[]> {
+// The list endpoint returns each channel WITH its participant ids, so the
+// channel list can show member counts without opening (selecting) each one.
+export interface ChannelListItem extends Channel {
+  participants: string[];
+}
+export async function listChannels(): Promise<ChannelListItem[]> {
   const r = await fetch("/api/channels");
-  return (await json<{ channels: Channel[] }>(r)).channels;
+  return (await json<{ channels: ChannelListItem[] }>(r)).channels;
 }
 
 // Channels a given session belongs to — for the contact profile's group entries.
