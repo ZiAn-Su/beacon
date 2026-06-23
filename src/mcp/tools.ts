@@ -63,6 +63,7 @@ export interface AgentOps {
       name?: string | null;
       task?: string | null;
       channelId?: string | null;
+      permissionMode?: string | null;
     },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
   // Group channels: a channel fans a message out to all its members (other
@@ -548,11 +549,27 @@ export function registerBeaconTools(
           .string()
           .optional()
           .describe('Optional: a channel you belong to that the new agent auto-joins on launch'),
+        permission_mode: z
+          .string()
+          .optional()
+          .describe(
+            'Optional permission mode for the spawned agent: "bypassPermissions" (no prompts), ' +
+            '"acceptEdits" (auto-accept file edits), "default" (ask each time), or "plan" (plan mode). ' +
+            'If omitted, uses the platform\'s global default. Use "bypassPermissions" to avoid interactive ' +
+            'permission prompts that would stall the agent at startup.',
+          ),
       },
     },
-    async ({ work_path, runtime, name, task, channel_id }) => {
+    async ({ work_path, runtime, name, task, channel_id, permission_mode }) => {
       const id = await ensure();
-      const r = await ops.spawn(id, { workPath: work_path, runtime, name, task, channelId: channel_id });
+      const r = await ops.spawn(id, {
+        workPath: work_path,
+        runtime,
+        name,
+        task,
+        channelId: channel_id,
+        permissionMode: permission_mode,
+      });
       if (r.status === 'spawned') {
         return {
           content: [{ type: 'text', text: `Spawned agent ${r.agentId}.` }],
@@ -1172,6 +1189,7 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
             name: params.name ?? null,
             task: params.task ?? null,
             channelId: params.channelId ?? null,
+            permissionMode: params.permissionMode ?? null,
           }),
         },
       );

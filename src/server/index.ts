@@ -22,7 +22,7 @@ import {
   isEffect,
 } from '../core/permissions';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission } from './pty';
 import { fanOutChannelMessage } from './channel-delivery';
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
@@ -378,6 +378,9 @@ function spawnAgent(params: {
   // authorization) and an optional channel for the child to auto-join on launch.
   spawnerId?: string | null;
   channelId?: string | null;
+  // Optional permission mode override (bypassPermissions / acceptEdits / default / plan).
+  // If omitted, uses the global settings.startPermission.
+  permissionMode?: string | null;
 }) {
   const session = store.createSession({
     runtime: params.runtime || 'claude-code',
@@ -399,6 +402,11 @@ function spawnAgent(params: {
   store.markPendingLaunch(session.id);
   // Start a fresh agent process (not a resume) in the folder.
   markFreshLaunch(session.id);
+  // If the spawner specified a permission mode, apply it for this spawn only
+  // (overrides the global default).
+  if (params.permissionMode?.trim()) {
+    setSpawnPermission(session.id, params.permissionMode.trim());
+  }
   const launched = ensurePty(session.id);
   // Hand the agent its task so it actually starts working. writeToPty queues
   // during the boot window and flushes once the TUI is ready, so this lands as
@@ -533,7 +541,7 @@ app.get('/api/spawn-requests', (_req: Request, res: Response) => {
 // Agent-initiated spawn of a new agent. :id is the spawner. Gated by the
 // spawn_agent capability: allow -> launch now; deny -> 403; ask -> raise an owner
 // approval and return pending (the spawn runs when the owner approves, via the
-// reply path or POST .../spawn-approve). body { workPath, runtime?, name?, task? }.
+// reply path or POST .../spawn-approve). body { workPath, runtime?, name?, task?, channelId?, permissionMode? }.
 app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
   if (!agentAuthOk(req, res)) return;
   const id = param(req, 'id');
@@ -547,6 +555,7 @@ app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
     name: body.name != null ? String(body.name) : null,
     task: body.task != null ? String(body.task) : null,
     channelId: body.channelId != null ? String(body.channelId) : null,
+    permissionMode: body.permissionMode != null ? String(body.permissionMode) : null,
   };
   store.touchSeen(id);
   const verdict = store.resolveCapability(id, 'spawn_agent');

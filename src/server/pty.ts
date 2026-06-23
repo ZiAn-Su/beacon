@@ -29,6 +29,21 @@ function permFlag(): string {
   return CLAUDE_PERM_MODES.includes(m) ? ` --permission-mode ${m}` : '';
 }
 
+// Per-spawn permission mode override: when spawn_agent includes a permissionMode
+// arg, we store it here (sessionId -> mode) so the next spawn uses it instead of
+// the global default. Cleared after spawn.
+const spawnPermOverride = new Map<string, string>();
+export function setSpawnPermission(sessionId: string, mode: string): void {
+  if (CLAUDE_PERM_MODES.includes(mode)) spawnPermOverride.set(sessionId, mode);
+}
+function takeSpawnPerm(sessionId: string): string {
+  const mode = spawnPermOverride.get(sessionId);
+  spawnPermOverride.delete(sessionId);
+  return mode && CLAUDE_PERM_MODES.includes(mode)
+    ? ` --permission-mode ${mode}`
+    : permFlag();
+}
+
 const isWin = process.platform === 'win32';
 
 // Cap of replayed scrollback per session (chars). Enough to redraw a TUI.
@@ -204,13 +219,13 @@ export function markFreshLaunch(sessionId: string): void {
   freshLaunch.add(sessionId);
 }
 
-function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boolean): SpawnTarget {
+function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boolean, sessionId: string): SpawnTarget {
   const wrap = (cmd: string): SpawnTarget =>
     isWin
       ? { file: 'cmd.exe', args: ['/k', cmd] }
       : { file: process.env.SHELL ?? 'bash', args: ['-c', `exec ${cmd}`] };
 
-  const perm = permFlag(); // non-blocking permission mode so it doesn't stall
+  const perm = takeSpawnPerm(sessionId); // per-spawn override or global default
   if (runtime === 'claude-code' || runtime === 'claude') {
     // Fresh launch -> a new conversation. Otherwise resume the EXACT conversation
     // when the platform knows its native id; else the most recent in the work dir.
@@ -241,7 +256,7 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
   if (!session) return { error: 'Session not found' };
 
   const fresh = freshLaunch.delete(sessionId);
-  const { file, args } = spawnTarget(session.runtime, session.nativeSessionId, fresh);
+  const { file, args } = spawnTarget(session.runtime, session.nativeSessionId, fresh, sessionId);
   const cols = 120;
   const rows = 30;
 

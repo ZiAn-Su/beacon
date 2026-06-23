@@ -18,7 +18,9 @@ async function api<T = any>(path: string, body?: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// SIM_SLOW=1 lengthens the pauses for clean demo/gif capture (no effect on logic).
+const PACE = process.env.SIM_SLOW ? 2.4 : 1;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms * PACE));
 
 async function main() {
   console.log(`[sim] platform: ${BASE}`);
@@ -29,6 +31,9 @@ async function main() {
   });
   const id = session.id;
   console.log(`[sim] registered session ${id}`);
+
+  // Lead-in so a screen recorder can switch to the browser before events start.
+  if (process.env.SIM_SLOW) await sleep(700);
 
   await api(`/api/sessions/${id}/status`, { status: 'working' });
   await api(`/api/sessions/${id}/notify`, { text: 'Cloned the repo and mapped the auth module. Starting the migration.' });
