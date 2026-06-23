@@ -15,6 +15,7 @@
     "build:web": "cd web && npm install && npm run build",
     "start": "npm run build:web && npm run platform",
     "update": "git pull && npm install && npm run build:web",
+    "restart": "pm2 restart beacon",
     "deploy": "npm run build:web && pm2 restart beacon",
     "release": "node scripts/release.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
