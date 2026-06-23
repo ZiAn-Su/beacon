@@ -75,6 +75,14 @@ function takeSpawnAllowedTools(sessionId: string): string {
 
 const isWin = process.platform === 'win32';
 
+// Callback the gateway registers to replay missed 1:1 messages into a terminal
+// once it is ready (see setOnPtyReady). Kept as a hook rather than a core bus
+// event so the pty layer doesn't reach into core domain events.
+let onPtyReady: ((sessionId: string) => void) | null = null;
+export function setOnPtyReady(cb: (sessionId: string) => void): void {
+  onPtyReady = cb;
+}
+
 // Cap of replayed scrollback per session (chars). Enough to redraw a TUI.
 const BUFFER_CAP = 200_000;
 // Kill an idle PTY this long after its last client disconnects.
@@ -363,6 +371,12 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     const queued = e.pending;
     e.pending = [];
     queued.forEach((line, i) => setTimeout(() => submitCold(e, line), i * 2800));
+    // Terminal is up: let the gateway replay any 1:1 messages this agent missed
+    // while it had no live terminal (e.g. across a platform restart), so nothing
+    // is silently dropped. Fires after the boot queue so order stays natural.
+    if (onPtyReady) {
+      setTimeout(() => { try { onPtyReady!(sessionId); } catch { /* ignore */ } }, queued.length * 2800 + 400);
+    }
   }, BOOT_MS);
 
   // While a terminal is open, keep the session's presence "online" — the

@@ -3,6 +3,23 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.10.2] - 2026-06-23
+
+### 修复 —— 消息不再静默丢失:真实送达状态 + 重连补送
+
+平台一重启,内存里的"活终端表"清空,发给 agent 的 1:1 消息既没被推、也没被补送,只能等 agent 主动
+check_inbox 才看到 —— 监护人发了像石沉大海。本版让消息**永不静默丢失**:
+
+- **真实送达状态**:消息**真正推达终端**时才标 `deliveredAt`(此前只在 agent 拉取时才标),监护人 UI 的
+  "已送达 ✓" 从此诚实 —— 有勾=agent 真收到了,没勾=还没收到,一眼可判。
+- **重连/终端就绪即补送**:平台保留未送达消息;当 agent 的终端(重)建好(`setOnPtyReady`)或 agent
+  重新注册连接时,把所有漏掉的 1:1 消息**重放进已存在的终端**(只进活终端、绝不新 spawn,避免重复进程)。
+  这样平台重启 / agent idle 一阵,消息都会在它下次有终端/重连时被补齐。
+- 新增 `store.markDelivered` / `store.undeliveredFor`,4 个单测覆盖。
+
+注:对纯 MCP/轮询型 agent(平台无其终端),投递仍靠 agent 侧 check_inbox 拉取(MCP 是请求-响应、平台无法
+主动推送);本版把这条的状态做准,并由 agent「每次唤醒先 check_inbox」兜底。纯后端改动。
+
 ## [0.10.1] - 2026-06-23
 
 ### 新增 —— spawn 可预批命令(`allowed_tools`):自主跑命令的 agent 不再逐条卡权限

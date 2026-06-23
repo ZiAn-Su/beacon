@@ -22,7 +22,7 @@ import {
   isEffect,
 } from '../core/permissions';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission, setSpawnAllowedTools } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission, setSpawnAllowedTools, setOnPtyReady } from './pty';
 import { fanOutChannelMessage } from './channel-delivery';
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
@@ -123,6 +123,9 @@ app.post('/api/sessions/register', (req: Request, res: Response) => {
     name: name != null ? String(name) : null,
     description: description != null ? String(description) : null,
   });
+  // An agent that just (re)connected may have a live terminal again (e.g. after a
+  // platform restart): replay anything it missed so a reconnect closes the gap.
+  flushUndelivered(session.id);
   // `pending` tells the agent the owner hasn't admitted it yet (quarantined):
   // it can hold its card but peers can't see or contact it until approved.
   ok(res, { session, agentId: session.id, pending: session.admittedAt == null });
@@ -627,6 +630,22 @@ function guardianDeliveryLine(text: string, ts: number): string {
   return `[Beacon · from your guardian · ${stampMMDDHHMM(ts)}] ${text} (reply via Beacon)`;
 }
 
+// Replay 1:1 messages the agent never received (deliveredAt null) into its live
+// terminal, so a platform restart or idle gap can't silently drop them. Pushes
+// ONLY into an existing terminal (never spawns one here — that would duplicate an
+// MCP agent's own process); marks each delivered once it lands. Called when a
+// terminal becomes ready (setOnPtyReady) and when an agent reconnects (register).
+function flushUndelivered(sessionId: string): void {
+  if (!hasLivePty(sessionId)) return;
+  for (const m of store.undeliveredFor(sessionId)) {
+    if (writeToPty(sessionId, guardianDeliveryLine(m.text, m.createdAt))) {
+      store.markDelivered(m.id);
+    }
+  }
+}
+// Wire the terminal-ready replay hook (pty layer calls this once a terminal boots).
+setOnPtyReady(flushUndelivered);
+
 // First message handed to a freshly spawned agent. Without this the agent boots
 // into a blank prompt and just idles (then gets reaped) — its task lives only as
 // metadata it never sees. The beacon MCP tools and the BEACON_SESSION_ID env are
@@ -697,13 +716,16 @@ app.post('/api/sessions/:id/reply', (req: Request, res: Response) => {
   } else if (hasLivePty(session.id)) {
     // ISS-010: check writeToPty return value — non-agent runtimes return false
     // even when a PTY exists (e.g. bare cmd.exe shells). Don't claim 'online'.
-    if (!writeToPty(session.id, deliveredText)) agent = 'queued';
+    if (writeToPty(session.id, deliveredText)) store.markDelivered(message.id);
+    else agent = 'queued';
   } else if (isOnline(session)) {
     // An autonomous agent (MCP/skill) is actively polling its inbox; leave the
-    // message for it to pick up rather than spawning a duplicate terminal.
+    // message UNDELIVERED for it to pull via check_inbox (which marks it). If it
+    // has a live terminal again later, flushUndelivered replays it.
   } else if (writeToPty(session.id, deliveredText)) {
     // No agent anywhere — start an interactive terminal on demand and type into
     // it. Output is buffered until the user opens the Terminal view.
+    store.markDelivered(message.id);
   } else {
     agent = 'queued'; // runtime we can't launch (rare)
   }

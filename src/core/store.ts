@@ -679,6 +679,15 @@ const insertMessage = db.prepare(
 const markMessageDelivered = db.prepare(
   `UPDATE messages SET deliveredAt = @deliveredAt WHERE id = @id AND deliveredAt IS NULL`
 );
+const selectMessageById = db.prepare(`SELECT * FROM messages WHERE id = ?`);
+// 1:1 human chat to this agent that has NOT reached it yet (deliveredAt null).
+// Used to replay missed messages when the agent's terminal (re)establishes or it
+// reconnects — so a platform restart / idle gap can't silently drop a message.
+const selectUndelivered = db.prepare(
+  `SELECT * FROM messages
+   WHERE sessionId = ? AND direction = 'human' AND kind = 'chat' AND deliveredAt IS NULL
+   ORDER BY createdAt ASC`
+);
 // A session's full thread also includes peer messages it sent (matched by
 // fromSessionId), so the sender can see its own outgoing agent->agent lines.
 const selectMessages = db.prepare(
@@ -743,6 +752,23 @@ export function inbox(sessionId: string, afterTs: number): Message[] {
     }
   }
   return msgs;
+}
+
+/** Mark one message reached the agent (pushed to its terminal). Idempotent; emits
+ *  the updated row so the human UI shows the delivery receipt. */
+export function markDelivered(messageId: string): void {
+  const r = selectMessageById.get(messageId) as MessageRow | undefined;
+  if (!r || r.deliveredAt != null) return;
+  const ts = now();
+  markMessageDelivered.run({ id: messageId, deliveredAt: ts });
+  bus.emit('message', mapMessage({ ...r, deliveredAt: ts }));
+}
+
+/** 1:1 human messages this agent has not yet received (deliveredAt null), oldest
+ *  first — replayed into its terminal when it (re)connects so a restart or idle
+ *  gap never silently drops a message. */
+export function undeliveredFor(sessionId: string): Message[] {
+  return (selectUndelivered.all(sessionId) as MessageRow[]).map(mapMessage);
 }
 
 // ---------- asks (blocking questions) ----------
