@@ -199,6 +199,25 @@ ensureColumn('channel_messages', 'toSessionId', 'TEXT');
 // on human/agent messages; only set for kind 'peer'. Defaulted at read time.
 ensureColumn('messages', 'fromSessionId', 'TEXT');
 
+// One-time backfill (user_version gate): before 0.10.2, deliveredAt was only set
+// when an agent PULLED its inbox, so messages it received via terminal push were
+// never stamped. The new replay-on-reconnect would otherwise treat that whole
+// historical backlog as "undelivered" and re-send already-handled messages (the
+// "old messages washed through again" bug). Mark all existing 1:1 human messages
+// as already delivered — they were, under the old push semantics. Runs exactly
+// once; user_version then pins it so later restarts never re-backfill (which would
+// wrongly mask genuinely-undelivered messages going forward).
+{
+  const ver = db.pragma('user_version', { simple: true }) as number;
+  if (ver < 1) {
+    db.exec(
+      `UPDATE messages SET deliveredAt = createdAt
+       WHERE deliveredAt IS NULL AND direction = 'human' AND kind = 'chat'`,
+    );
+    db.pragma('user_version = 1');
+  }
+}
+
 const now = () => Date.now();
 
 // ---------- owner (guardian) ----------
