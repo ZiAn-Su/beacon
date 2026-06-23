@@ -3,6 +3,20 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.11.0] - 2026-06-24
+
+### 新增 —— `retire_agent`:spawn 的反向操作,让一次性 agent 跑完能退场
+
+客户(丈布)反馈的对称缺口:spawn(招聘)已很完善(permission_mode / allowed_tools / channel_id),
+但没有对应的"裁撤/退场" —— 一次性任务 agent 跑完进 idle 后仍挂在 list_agents 和频道成员里,CEO agent
+清不掉,只能人类去终端逐个关。
+
+新增 `retire_agent(agent_id)`:停止该 agent 的终端 + 从在册列表与其所有频道**归档移除**(归档非删除,历史
+保留、人类仍可彻底删)。授权门与"联系"一致 —— 你 spawn 出的子 agent 自动算"有权管理";不能退役自己。
+这样"招聘→干活→退场"闭环,多智能体组织能按编制自治调度、不必人类去终端清场。工具 21→22。
+
+`store.retireAgent` + 网关 `/retire-agent` 路由 + 两条 MCP 传输 + `retire_agent` 工具;2 个单测覆盖。纯后端。
+
 ## [0.10.3] - 2026-06-23
 
 ### 修复 —— 重连补送不再把"老消息"重放一遍

@@ -67,6 +67,8 @@ export interface AgentOps {
       allowedTools?: string[] | null;
     },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
+  // Retire an agent you manage (the complement of spawn): stop it and archive it.
+  retire(actorId: string, agentId: string): Promise<{ ok: boolean; reason?: string }>;
   // Group channels: a channel fans a message out to all its members (other
   // agents + the human guardian). v1 is broadcast chat; v2 adds blocking asks.
   listChannels(forId: string): Promise<{ id: string; name: string }[]>;
@@ -613,6 +615,30 @@ export function registerBeaconTools(
         }
         // still pending — keep waiting
       }
+    },
+  );
+
+  server.registerTool(
+    'retire_agent',
+    {
+      title: 'Retire an agent you manage',
+      description:
+        'The complement of spawn_agent: stop an agent and archive it (remove it from the active ' +
+        'roster and from its channels) once its task is done — so finished one-off workers do not ' +
+        'pile up as idle contacts. You may retire an agent you are authorized to manage (an agent ' +
+        'you spawned is authorized automatically). Archive, not delete: its history is kept and the ' +
+        'human can still permanently delete it. Use agent_id from list_agents.',
+      inputSchema: {
+        agent_id: z.string().describe('The agent to retire (from list_agents) — one you manage'),
+      },
+    },
+    async ({ agent_id }) => {
+      const id = await ensure();
+      const r = await ops.retire(id, agent_id);
+      if (!r.ok) {
+        return { content: [{ type: 'text', text: `Could not retire: ${r.reason ?? 'unknown error'}` }] };
+      }
+      return { content: [{ type: 'text', text: `Retired agent ${agent_id} (stopped and archived).` }] };
     },
   );
 
@@ -1211,6 +1237,19 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
         },
       );
       return { status: r.status, askId: r.askId, agentId: r.session?.id };
+    },
+    async retire(actorId, agentId) {
+      try {
+        await api(`/api/sessions/${actorId}/retire-agent`, {
+          method: 'POST',
+          body: JSON.stringify({ agentId }),
+        });
+        return { ok: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        const m = msg.match(/\{"error":"([^"]+)"\}/);
+        return { ok: false, reason: m ? m[1] : msg };
+      }
     },
     async listChannels(forId) {
       const { channels } = await api<{ channels: { id: string; name: string }[] }>(

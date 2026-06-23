@@ -628,6 +628,20 @@ export function setArchived(id: string, archived: boolean): Session | undefined 
   return updated;
 }
 
+/**
+ * Retire an agent: remove it from every channel and archive it (hidden from the
+ * active roster + channel rosters). The complement of spawn — lets a CEO agent
+ * clean up a one-off worker that finished, instead of leaving it idle in the list
+ * forever. Archive, not delete: history is kept. The caller stops the terminal
+ * (killPty) since core can't touch the PTY.
+ */
+export function retireAgent(sessionId: string): Session | undefined {
+  const s = getSession(sessionId);
+  if (!s) return undefined;
+  for (const c of channelsForSession(sessionId)) removeParticipant(c.id, sessionId);
+  return setArchived(sessionId, true);
+}
+
 const deleteSessionRow = db.prepare(`DELETE FROM sessions WHERE id = ?`);
 const deleteSessionMessages = db.prepare(
   `DELETE FROM messages WHERE sessionId = ? OR fromSessionId = ?`,

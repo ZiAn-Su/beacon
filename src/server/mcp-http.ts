@@ -32,9 +32,12 @@ type SpawnFn = (
   },
   spawnerId: string,
 ) => { session: { id: string } };
+// Stopping a retired agent's terminal lives in the gateway (the PTY layer), so
+// the hosted MCP receives it as a callback too.
+type KillPtyFn = (sessionId: string) => void;
 
 // Direct, in-process ops backed by the core store (no HTTP round-trip).
-function storeOps(spawnFn: SpawnFn): AgentOps {
+function storeOps(spawnFn: SpawnFn, killPtyFn: KillPtyFn): AgentOps {
   return {
     async register(input) {
       const runtime = input.runtime || 'claude-code';
@@ -151,6 +154,17 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
       const { session } = spawnFn(p, spawnerId);
       return { status: 'spawned', agentId: session.id };
     },
+    async retire(actorId, agentId) {
+      // Mirror the REST gate: same authorization as contacting the target.
+      if (!store.getSession(agentId)) return { ok: false, reason: 'no such agent' };
+      if (agentId === actorId) return { ok: false, reason: 'cannot retire yourself' };
+      if (store.resolvePeerPermission(actorId, agentId) !== 'allow') {
+        return { ok: false, reason: 'not authorized to manage this agent' };
+      }
+      killPtyFn(agentId);
+      store.retireAgent(agentId);
+      return { ok: true };
+    },
     async listChannels(forId) {
       return store.channelsForSession(forId).map((c) => ({ id: c.id, name: c.name }));
     },
@@ -210,7 +224,7 @@ function storeOps(spawnFn: SpawnFn): AgentOps {
 
 export function mountMcpHttp(
   app: Express,
-  opts: { token: string; spawn: SpawnFn },
+  opts: { token: string; spawn: SpawnFn; killPty: KillPtyFn },
 ): void {
   // One transport per MCP session id (Streamable HTTP keeps the connection
   // stateful so a single agent's tool calls share one Beacon session).
@@ -251,7 +265,7 @@ export function mountMcpHttp(
         if (transport!.sessionId) delete transports[transport!.sessionId];
       };
       const server = new McpServer({ name: 'beacon', version: '0.4.0' });
-      registerBeaconTools(server, storeOps(opts.spawn), {
+      registerBeaconTools(server, storeOps(opts.spawn, opts.killPty), {
         runtime: process.env.AGENT_RUNTIME ?? 'claude-code',
         workPath: '',
         task: '',

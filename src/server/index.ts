@@ -602,6 +602,27 @@ app.post('/api/spawn-requests/:askId/decide', (req: Request, res: Response) => {
   ok(res, { approve, spawned });
 });
 
+// An agent retires another agent it manages (the complement of spawn): stops its
+// terminal and archives it (out of the active roster + channels). Gated by the
+// same authorization as contacting it — an agent you spawned is auto-authorized.
+// body { agentId }. Archive, not delete — history is kept; the human can still
+// permanently delete from the UI.
+app.post('/api/sessions/:id/retire-agent', (req: Request, res: Response) => {
+  if (!agentAuthOk(req, res)) return;
+  const id = param(req, 'id');
+  const agentId = String(req.body?.agentId ?? '');
+  if (!store.getSession(id)) return notFound(res);
+  if (!store.getSession(agentId)) return notFound(res);
+  if (agentId === id) { res.status(400).json({ error: 'cannot retire yourself' }); return; }
+  if (store.resolvePeerPermission(id, agentId) !== 'allow') {
+    res.status(403).json({ error: 'not authorized to manage this agent' }); return;
+  }
+  store.touchSeen(id);
+  killPty(agentId);
+  const session = store.retireAgent(agentId);
+  ok(res, { session });
+});
+
 app.get('/api/sessions/:id', (req: Request, res: Response) => {
   const session = store.getSession(param(req,'id'));
   if (!session) return notFound(res);
@@ -1225,6 +1246,7 @@ app.get('/api/connect-info', (req: Request, res: Response) => {
 mountMcpHttp(app, {
   token: PLATFORM_TOKEN,
   spawn: (params, spawnerId) => spawnAgent({ ...params, origin: 'agent', spawnerId }),
+  killPty,
 });
 
 // ----------------------------------------------------------------------------
