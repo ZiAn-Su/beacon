@@ -71,6 +71,7 @@ interface LivePty {
   promptNotedAt: number; // last time we surfaced a stuck-on-prompt notify
   limitNotedAt: number; // last time we surfaced a usage/rate-limit notify
   promptWaiting: boolean; // we set 'waiting' from a terminal prompt (recover it)
+  intentionalKill: boolean; // platform killed it on purpose (delete / idle reap) — don't notify on exit
 }
 
 // How long after spawn we treat the TUI as "still booting" — messages sent in
@@ -101,10 +102,12 @@ const QUIET_IDLE_MS = 60_000;
 // decisions); we surface them so the human isn't left wondering why no reply came.
 const PROMPT_GATE =
   /(do you want to proceed|do you trust the files|press \d+ to|❯\s*\d+\.|\b1\.\s+yes\b|\(y\/n\)|\[y\/n\])/i;
-// The model/provider refused or throttled: usage cap, rate limit, quota. Same
-// silent-stall problem from the human's side — surface it instead of hanging.
+// The model/provider refused or throttled: usage cap, rate limit, quota, or an
+// account spending limit (402 Daily spending limit / daily quota). Same silent-
+// stall problem from the human's side — surface it instead of hanging. Wording
+// varies across providers/plans, so match the common phrasings AND the HTTP code.
 const LIMIT_GATE =
-  /(usage limit reached|reached your usage limit|approaching your .{0,24}limit|rate limit|429 too many|quota exceeded|insufficient .{0,14}(quota|credit|balance)|overloaded_error)/i;
+  /(usage limit reached|reached your usage limit|approaching your .{0,24}limit|spending limit|daily quota|quota will reset|rate limit|\b402\b|429 too many|quota exceeded|insufficient .{0,14}(quota|credit|balance)|overloaded_error)/i;
 // A persistent prompt produces output once; debounce so we notify once, not on
 // every chunk, and re-notify only if it recurs after this window.
 const DETECT_DEBOUNCE_MS = 45_000;
@@ -141,6 +144,7 @@ export function hasLivePty(sessionId: string): boolean {
 export function killPty(sessionId: string): void {
   const entry = live.get(sessionId);
   if (!entry) return;
+  entry.intentionalKill = true; // deliberate teardown — onExit must not notify
   try { entry.proc.kill(); } catch { /* already exited */ }
   if (entry.idleTimer) clearTimeout(entry.idleTimer);
   if (entry.heartbeat) clearInterval(entry.heartbeat);
@@ -171,6 +175,7 @@ export function ensurePty(sessionId: string): boolean {
 function armIdle(sessionId: string, entry: LivePty): void {
   if (entry.clients.size === 0 && !entry.idleTimer) {
     entry.idleTimer = setTimeout(() => {
+      entry.intentionalKill = true; // routine reap of an unwatched terminal — not a crash
       try { entry.proc.kill(); } catch { /* already exited */ }
       if (entry.heartbeat) clearInterval(entry.heartbeat);
       live.delete(sessionId);
@@ -294,6 +299,7 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     promptNotedAt: 0,
     limitNotedAt: 0,
     promptWaiting: false,
+    intentionalKill: false,
   };
   live.set(sessionId, entry);
 
@@ -372,7 +378,10 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
         sessionId,
         direction: 'agent',
         kind: 'notify',
-        text: `Paused — hit a model usage/rate limit.${line ? ` ${line}` : ''}`,
+        text:
+          `Paused — hit a model usage / account limit.${line ? ` ${line}` : ''} ` +
+          `If this is an account spending/quota cap, switch the account and restart this agent ` +
+          `(messages won't get through until it restarts on a working account).`,
       });
       store.setStatus(sessionId, 'idle');
     } else if (
@@ -403,6 +412,24 @@ function getOrSpawn(sessionId: string): LivePty | { error: string } {
     }
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
     if (entry.heartbeat) clearInterval(entry.heartbeat);
+    // The agent's underlying terminal process DIED on its own — not a deliberate
+    // teardown (contact delete / idle reap). The human must be told, or their
+    // messages silently vanish into a process that no longer exists (exactly the
+    // "Beacon went dead" failure when an agent hit its account quota). Skip if a
+    // limit notify just fired (it already explained the cause and the fix).
+    if (!entry.intentionalKill && Date.now() - entry.limitNotedAt > 15_000) {
+      store.addMessage({
+        sessionId,
+        direction: 'agent',
+        kind: 'notify',
+        text:
+          `Stopped — the agent's terminal process exited (code ${exitCode}). ` +
+          `This often means it hit an account limit or its session errored. ` +
+          `Send it a message to restart it (it relaunches on the current account); ` +
+          `if it keeps failing, start a fresh conversation for it.`,
+      });
+      try { store.setStatus(sessionId, 'idle'); } catch { /* session may be gone */ }
+    }
     live.delete(sessionId);
   });
 
