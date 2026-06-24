@@ -6,6 +6,7 @@
   "description": "Beacon: humans and AI agents talk over a neutral, runtime-agnostic bus. Agents plug in via MCP; the human side reuses a mature IM (Matrix/Element) or a built-in dev console.",
   "scripts": {
     "platform": "tsx src/server/index.ts",
+    "demo": "tsx scripts/demo-platform.ts",
     "dev": "tsx watch src/server/index.ts",
     "mcp": "tsx src/mcp/server.ts",
     "sim": "tsx scripts/sim-agent.ts",
