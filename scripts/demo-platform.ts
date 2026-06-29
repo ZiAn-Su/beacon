@@ -15,6 +15,9 @@
 // and re-running. The live data/beacon.db is never touched by this script.
 //
 // Override defaults if needed: DEMO_PORT / DEMO_DB.
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 process.env.PORT = process.env.DEMO_PORT ?? process.env.PORT ?? '4400';
 process.env.BEACON_DB = process.env.DEMO_DB ?? process.env.BEACON_DB ?? 'data/demo.db';
 
@@ -36,8 +39,16 @@ if (store.listSessions().length === 0) {
 }
 
 function seedDemoScene(): void {
-  const agent = (name: string, task: string, about: string) =>
-    store.createSession({ runtime: 'claude-code', workPath: `/demo/${name.toLowerCase().replace(/\W+/g, '-')}`, task, name, description: about, admitted: true });
+  // Give each demo agent a REAL, isolated working directory. A fake path made the
+  // embedded Terminal fail with "Cannot create process, error code: 267" (invalid
+  // directory). These dirs are empty + under data/ (gitignored) — opening a
+  // contact's Terminal lands in a real folder instead of erroring.
+  const wsRoot = join(process.cwd(), 'data', 'demo-workspaces');
+  const agent = (name: string, task: string, about: string) => {
+    const dir = join(wsRoot, name.toLowerCase().replace(/\W+/g, '-'));
+    mkdirSync(dir, { recursive: true });
+    return store.createSession({ runtime: 'claude-code', workPath: dir, task, name, description: about, admitted: true });
+  };
 
   const max = agent('Backend engineer Max', 'Migrating the auth module to the new token format', 'Backend specialist. Owns auth, sessions, and the token pipeline.');
   const iris = agent('Docs writer Iris', 'Rewriting the API reference for v2', 'Turns shipped features into clear docs and examples.');
