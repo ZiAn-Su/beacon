@@ -29,6 +29,7 @@ type SpawnFn = (
     channelId?: string | null;
     permissionMode?: string | null;
     allowedTools?: string[] | null;
+    disallowedTools?: string[] | null;
   },
   spawnerId: string,
 ) => { session: { id: string } };
@@ -146,6 +147,7 @@ function storeOps(spawnFn: SpawnFn, killPtyFn: KillPtyFn): AgentOps {
         channelId: params.channelId ?? null,
         permissionMode: params.permissionMode ?? null,
         allowedTools: params.allowedTools ?? null,
+        disallowedTools: params.disallowedTools ?? null,
       };
       if (v === 'ask') {
         const askId = store.createSpawnRequest(spawnerId, p);

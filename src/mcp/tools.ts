@@ -65,6 +65,7 @@ export interface AgentOps {
       channelId?: string | null;
       permissionMode?: string | null;
       allowedTools?: string[] | null;
+      disallowedTools?: string[] | null;
     },
   ): Promise<{ status: string; askId?: string; agentId?: string }>;
   // Retire an agent you manage (the complement of spawn): stop it and archive it.
@@ -561,23 +562,33 @@ export function registerBeaconTools(
           .optional()
           .describe(
             'Optional permission mode for the spawned agent: "acceptEdits" (auto-accept file edits, ' +
-            'ask for commands), "default" (ask each time), "plan" (plan mode), "dontAsk"/"auto", or ' +
-            '"bypassPermissions" (no prompts, but shows a one-time interactive risk confirmation at ' +
-            'startup that can stall the agent — prefer acceptEdits + allowed_tools instead). If omitted, ' +
-            'uses the platform\'s global default.',
+            'ask for commands), "default" (ask each time), "plan", "dontAsk"/"auto" (still prompt for ' +
+            'some commands), "bypassPermissions" (no prompts but a one-time interactive risk ' +
+            'confirmation at startup that stalls an unattended agent), or "dangerouslySkip" (maps to ' +
+            'claude --dangerously-skip-permissions: NO prompts AND NO startup confirmation — a fully ' +
+            'unattended agent). For an autonomous read-only worker (e.g. a QA agent running ffmpeg/git), ' +
+            'use "dangerouslySkip" + disallowed_tools to block writes/network. If omitted, uses the ' +
+            'platform default.',
           ),
         allowed_tools: z
           .array(z.string())
           .optional()
           .describe(
             'Optional list of tools / command prefixes the spawned agent may run WITHOUT a per-call ' +
-            'permission prompt, e.g. ["Bash(ffmpeg *)", "Bash(git *)", "Read", "Write"]. This is the ' +
-            'safe, granular way to let an autonomous agent (e.g. a QA agent that must run commands) ' +
-            'work unattended without bypassPermissions and without stalling on prompts.',
+            'permission prompt, e.g. ["Bash(ffmpeg *)", "Bash(git *)", "Read"] (-> claude --allowedTools).',
+          ),
+        disallowed_tools: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Optional list of tools the spawned agent may NOT use (-> claude --disallowedTools), e.g. ' +
+            '["Write", "Edit", "WebFetch", "WebSearch"]. Combine with permission_mode "dangerouslySkip" ' +
+            'to make a fully-unattended but read-only / no-network agent (runs commands, can\'t modify ' +
+            'or reach out) — the safe shape for an independent QA / review agent.',
           ),
       },
     },
-    async ({ work_path, runtime, name, task, channel_id, permission_mode, allowed_tools }) => {
+    async ({ work_path, runtime, name, task, channel_id, permission_mode, allowed_tools, disallowed_tools }) => {
       const id = await ensure();
       const r = await ops.spawn(id, {
         workPath: work_path,
@@ -587,6 +598,7 @@ export function registerBeaconTools(
         channelId: channel_id,
         permissionMode: permission_mode,
         allowedTools: allowed_tools,
+        disallowedTools: disallowed_tools,
       });
       if (r.status === 'spawned') {
         return {
@@ -1233,6 +1245,7 @@ export function httpOps(platformUrl: string, token: string): AgentOps {
             channelId: params.channelId ?? null,
             permissionMode: params.permissionMode ?? null,
             allowedTools: params.allowedTools ?? null,
+            disallowedTools: params.disallowedTools ?? null,
           }),
         },
       );

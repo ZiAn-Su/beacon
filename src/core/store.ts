@@ -1315,10 +1315,11 @@ export interface SpawnParams {
   // Optional channel the new agent should auto-join on launch (the spawner must
   // be a member of it). Persisted so an approved-later spawn still joins.
   channelId?: string | null;
-  // Optional permission mode + pre-approved tools, persisted so an approved-later
-  // spawn launches with the same flags the spawner requested.
+  // Optional permission mode + pre-approved / denied tools, persisted so an
+  // approved-later spawn launches with the same flags the spawner requested.
   permissionMode?: string | null;
   allowedTools?: string[] | null;
+  disallowedTools?: string[] | null;
 }
 interface SpawnRow {
   id: string;

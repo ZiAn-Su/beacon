@@ -22,7 +22,7 @@ import {
   isEffect,
 } from '../core/permissions';
 import { mountMcpHttp } from './mcp-http';
-import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission, setSpawnAllowedTools, setOnPtyReady } from './pty';
+import { mountPtyWs, hasLivePty, writeToPty, ensurePty, markFreshLaunch, killPty, setSpawnPermission, setSpawnAllowedTools, setSpawnDisallowedTools, setOnPtyReady } from './pty';
 import { fanOutChannelMessage } from './channel-delivery';
 import { startAgent, isOnline } from './wake';
 import { resolveActiveSessionId, listAgentSessions } from './agent-sessions';
@@ -392,6 +392,9 @@ function spawnAgent(params: {
   // Optional pre-approved tools (-> claude --allowedTools), e.g. ["Bash(ffmpeg *)",
   // "Read"], so the agent can run those without a per-call permission prompt.
   allowedTools?: string[] | null;
+  // Optional denied tools (-> claude --disallowedTools), e.g. ["Write", "Edit",
+  // "WebFetch"], to make a read-only / no-network agent.
+  disallowedTools?: string[] | null;
 }) {
   const session = store.createSession({
     runtime: params.runtime || 'claude-code',
@@ -423,6 +426,9 @@ function spawnAgent(params: {
   if (params.allowedTools && params.allowedTools.length) {
     setSpawnAllowedTools(session.id, params.allowedTools.map(String));
   }
+  if (params.disallowedTools && params.disallowedTools.length) {
+    setSpawnDisallowedTools(session.id, params.disallowedTools.map(String));
+  }
   const launched = ensurePty(session.id);
   // Hand the agent its task so it actually starts working. writeToPty queues
   // during the boot window and flushes once the TUI is ready, so this lands as
@@ -440,7 +446,14 @@ app.post('/api/sessions/launch', (req: Request, res: Response) => {
   const name = body.name != null ? String(body.name) : null;
   const task = body.task != null ? String(body.task) : '';
   if (!workPath.trim()) { res.status(400).json({ error: 'workPath is required' }); return; }
-  const { session, launched } = spawnAgent({ workPath, runtime, name, task, origin: 'human' });
+  // A human-launched agent can also set permission mode / pre-approved tools, the
+  // same options the agent-side spawn offers.
+  const permissionMode = body.permissionMode != null ? String(body.permissionMode) : null;
+  const allowedTools = Array.isArray(body.allowedTools) ? body.allowedTools.map(String) : null;
+  const disallowedTools = Array.isArray(body.disallowedTools) ? body.disallowedTools.map(String) : null;
+  const { session, launched } = spawnAgent({
+    workPath, runtime, name, task, origin: 'human', permissionMode, allowedTools, disallowedTools,
+  });
   ok(res, { session, launched });
 });
 
@@ -573,6 +586,7 @@ app.post('/api/sessions/:id/spawn', (req: Request, res: Response) => {
     channelId: body.channelId != null ? String(body.channelId) : null,
     permissionMode: body.permissionMode != null ? String(body.permissionMode) : null,
     allowedTools: Array.isArray(body.allowedTools) ? body.allowedTools.map(String) : null,
+    disallowedTools: Array.isArray(body.disallowedTools) ? body.disallowedTools.map(String) : null,
   };
   store.touchSeen(id);
   const verdict = store.resolveCapability(id, 'spawn_agent');

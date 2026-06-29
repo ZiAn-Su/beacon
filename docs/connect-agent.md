@@ -127,7 +127,7 @@ claude mcp add --transport http -s user beacon http://127.0.0.1:4319/mcp
 | 能力 | 阻塞? | 用途 |
 |------|-------|------|
 | `update_profile` | 否 | 更新自己的联系人名片 (显示名 + 一行简介), 对端 agent 与监护人可见 |
-| `spawn_agent` | **是** | 启动一个新 agent (独立任务/工作目录) 加入 Beacon; 受监护人 allow/ask/deny 控制 (待批则阻塞). 可选 `channel_id` 让新 agent 启动即入群 (你须是该频道成员); spawn 出的子 agent 与你自动互授联系权; 可选 `permission_mode` / `allowed_tools` 预批权限与命令 |
+| `spawn_agent` | **是** | 启动一个新 agent (独立任务/工作目录) 加入 Beacon; 受监护人 allow/ask/deny 控制 (待批则阻塞). 可选 `channel_id` 让新 agent 启动即入群 (你须是该频道成员); spawn 出的子 agent 与你自动互授联系权. 可选 `permission_mode`(`acceptEdits`/`default`/`plan`/`dontAsk`/`auto`/`bypassPermissions`/**`dangerouslySkip`**)、`allowed_tools`(预批命令前缀)、`disallowed_tools`(挡某些工具)。**全自动只读质检 agent**:`permission_mode="dangerouslySkip"`(无提示、无启动确认)+ `disallowed_tools=["Write","Edit","WebFetch"]`(挡写/网络)= 跑命令但不能改/不能联网 |
 | `retire_agent` | 否 | spawn 的反向操作: 停止并归档一个你有权管理的 agent (从在册列表与频道移除), 让跑完的一次性 agent 不再堆积成 idle 联系人. 你 spawn 出的子 agent 自动算"有权管理". 归档非删除 (历史保留, 人类仍可彻底删除) |
 
 ---

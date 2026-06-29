@@ -23,10 +23,18 @@ import { getSettings } from '../core/settings';
 // bypassPermissions) — otherwise it stalls on a "Do you want to proceed?" prompt
 // for every tool call, invisibly to the human on Beacon. wake.ts already passes
 // this for relaunch; the PTY launch must too.
-const CLAUDE_PERM_MODES = ['bypassPermissions', 'acceptEdits', 'default', 'plan', 'auto', 'dontAsk'];
+// Accepted permission modes. 'dangerouslySkip' is special — it maps to claude's
+// `--dangerously-skip-permissions` FLAG (non-interactive bypass), NOT to
+// `--permission-mode`, because that flag is the one meant to skip ALL prompts
+// without the interactive "Bypass Permissions mode" startup confirmation that
+// `--permission-mode bypassPermissions` shows (which stalls an unattended agent).
+const CLAUDE_PERM_MODES = ['bypassPermissions', 'acceptEdits', 'default', 'plan', 'auto', 'dontAsk', 'dangerouslySkip'];
+export function permModeToFlag(mode: string): string {
+  if (mode === 'dangerouslySkip') return ' --dangerously-skip-permissions';
+  return CLAUDE_PERM_MODES.includes(mode) ? ` --permission-mode ${mode}` : '';
+}
 function permFlag(): string {
-  const m = getSettings().startPermission;
-  return CLAUDE_PERM_MODES.includes(m) ? ` --permission-mode ${m}` : '';
+  return permModeToFlag(getSettings().startPermission);
 }
 
 // Per-spawn permission mode override: when spawn_agent includes a permissionMode
@@ -39,9 +47,7 @@ export function setSpawnPermission(sessionId: string, mode: string): void {
 function takeSpawnPerm(sessionId: string): string {
   const mode = spawnPermOverride.get(sessionId);
   spawnPermOverride.delete(sessionId);
-  return mode && CLAUDE_PERM_MODES.includes(mode)
-    ? ` --permission-mode ${mode}`
-    : permFlag();
+  return mode ? permModeToFlag(mode) : permFlag();
 }
 
 // Per-spawn pre-approved tools: maps to claude's `--allowedTools` so a spawned
@@ -71,6 +77,21 @@ function takeSpawnAllowedTools(sessionId: string): string {
   // Value is sanitized (no quotes/metachars), so double-quoting is safe in both
   // cmd.exe and bash.
   return tools ? ` --allowedTools "${tools}"` : '';
+}
+
+// Per-spawn DENIED tools -> claude's `--disallowedTools`. The other half of a
+// read-only safe agent: block writes / network (e.g. ["Write", "Edit", "WebFetch"])
+// so a fully-unattended QA agent can run commands but can't modify or reach out.
+// Same hard sanitization as allowed tools (interpolated into the launch command).
+const spawnDisallowedTools = new Map<string, string>();
+export function setSpawnDisallowedTools(sessionId: string, tools: string[]): void {
+  const safe = sanitizeAllowedTools(tools);
+  if (safe) spawnDisallowedTools.set(sessionId, safe);
+}
+function takeSpawnDisallowedTools(sessionId: string): string {
+  const tools = spawnDisallowedTools.get(sessionId);
+  spawnDisallowedTools.delete(sessionId);
+  return tools ? ` --disallowedTools "${tools}"` : '';
 }
 
 const isWin = process.platform === 'win32';
@@ -286,9 +307,11 @@ function spawnTarget(runtime: string, nativeSessionId: string | null, fresh: boo
       ? { file: 'cmd.exe', args: ['/k', cmd] }
       : { file: process.env.SHELL ?? 'bash', args: ['-c', `exec ${cmd}`] };
 
-  // Per-spawn flags: permission mode + pre-approved tools (--allowedTools). Both
-  // are consumed (cleared) here, so they only apply to this one launch.
-  const perm = takeSpawnPerm(sessionId) + takeSpawnAllowedTools(sessionId);
+  // Per-spawn flags: permission mode + pre-approved (--allowedTools) + denied
+  // (--disallowedTools) tools. All consumed (cleared) here, so they only apply to
+  // this one launch.
+  const perm =
+    takeSpawnPerm(sessionId) + takeSpawnAllowedTools(sessionId) + takeSpawnDisallowedTools(sessionId);
   if (runtime === 'claude-code' || runtime === 'claude') {
     // Fresh launch -> a new conversation. Otherwise resume the EXACT conversation
     // when the platform knows its native id; else the most recent in the work dir.

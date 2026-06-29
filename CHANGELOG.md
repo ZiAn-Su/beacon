@@ -3,6 +3,25 @@
 本项目遵循[语义化版本](https://semver.org/lang/zh-CN/)。`MAJOR.MINOR.PATCH`：
 向后兼容的新功能进 MINOR,修复进 PATCH,破坏「契约」(MCP/HTTP API、skill 命令、数据库结构)的改动才进 MAJOR。
 
+## [0.12.0] - 2026-06-29
+
+### 新增 —— 全自动只读 agent:`dangerouslySkip` 权限档 + `disallowed_tools`
+
+客户(丈布)的"全自动独立质检"差最后一档:要跑命令的复核 agent 没有"无提示 + 不卡启动"的权限模式 ——
+`acceptEdits`/`dontAsk` 中途仍拦命令,`bypassPermissions` 又弹一次性启动风险确认要人点。
+
+补两件,合起来就是"只读安全档":
+- `spawn_agent` 的 `permission_mode` 新增 **`dangerouslySkip`** —— 映射 claude 的 `--dangerously-skip-permissions`
+  标志:**无逐条提示、且无 bypass 那个启动确认**,agent 全自动跑。**已在隔离 demo 平台实测**:ccs:mm + dangerouslySkip
+  的 agent 无人值守跑通了 Bash 命令(写出标记文件)、全程零提示零卡顿。
+- `spawn_agent` 新增 **`disallowed_tools`**(-> claude `--disallowedTools`),如 `["Write","Edit","WebFetch"]`,
+  挡写/挡网络。
+
+**只读质检 agent 配方**:`permission_mode="dangerouslySkip"` + `disallowed_tools=["Write","Edit","WebFetch"]`
+= 能跑命令、不能改文件、不能联网,真正全自动且最小权限面。`runtime="ccs:mm"`(MiniMax)可避开 Claude 额度。
+
+`permModeToFlag`(dangerouslySkip→flag)单测;sanitize 防注入复用 allowed_tools 那套。纯后端,118 测试全绿。
+
 ## [0.11.0] - 2026-06-24
 
 ### 新增 —— `retire_agent`:spawn 的反向操作,让一次性 agent 跑完能退场

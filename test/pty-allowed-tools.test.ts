@@ -3,7 +3,20 @@
 // metacharacters (no command injection) while keeping valid tool specs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeAllowedTools } from '../src/server/pty.js';
+import { sanitizeAllowedTools, permModeToFlag } from '../src/server/pty.js';
+
+// permModeToFlag: 'dangerouslySkip' must map to the --dangerously-skip-permissions
+// FLAG (no startup confirmation, fully unattended), other valid modes to
+// --permission-mode, and unknown modes to nothing.
+test('permModeToFlag maps dangerouslySkip to the flag, others to --permission-mode', () => {
+  assert.equal(permModeToFlag('dangerouslySkip'), ' --dangerously-skip-permissions');
+  assert.equal(permModeToFlag('acceptEdits'), ' --permission-mode acceptEdits');
+  assert.equal(permModeToFlag('bypassPermissions'), ' --permission-mode bypassPermissions');
+  assert.equal(permModeToFlag('dontAsk'), ' --permission-mode dontAsk');
+  assert.equal(permModeToFlag('auto'), ' --permission-mode auto');
+  assert.equal(permModeToFlag('nonsense'), '');
+  assert.equal(permModeToFlag(''), '');
+});
 
 test('keeps valid tool names and command-prefix patterns', () => {
   assert.equal(
