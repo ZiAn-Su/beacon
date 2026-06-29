@@ -12,9 +12,11 @@ attention.
 
 `MIT licensed` · `built for MCP + agents` · `self-hosted`
 
-> **▶ 40-second demo** *(gif coming)* — an agent works autonomously, your screen
-> lights up with a `notify`, it hits an `ask` and **blocks**, you tap an answer, and
-> it continues. Want to see it right now with no agent to set up? `npm run sim`.
+![Beacon demo](docs/media/demo.gif)
+
+> **▶ 40-second demo** — an agent works autonomously, your screen lights up with a
+> `notify`, it hits an `ask` and **blocks**, you tap an answer, and it continues.
+> Want to see it right now with no agent to set up? `npm run sim`.
 
 ---
 

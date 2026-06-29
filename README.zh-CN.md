@@ -10,8 +10,10 @@
 
 `MIT 开源` · `为 MCP + agent 而生` · `自托管`
 
-> **▶ 40 秒 demo**(动图待录)—— agent 自主干活,你的屏幕亮起一条 `notify`,它抛出一个
-> `ask` 并**阻塞**,你点一下答复,它继续。想现在就看、又不想配真 agent?`npm run sim`。
+![Beacon demo](docs/media/demo.gif)
+
+> **▶ 40 秒 demo** —— agent 自主干活,你的屏幕亮起一条 `notify`,它抛出一个 `ask` 并**阻塞**,
+> 你点一下答复,它继续。想现在就看、又不想配真 agent?`npm run sim`。
 
 ---
 
